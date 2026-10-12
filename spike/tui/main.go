@@ -330,6 +330,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.query != "" {
 			m.matches = m.rendered.Find(m.query)
 		}
+		// The file may have changed since the last load; selections into
+		// the old lists are dropped or clamped.
+		if m.linkIdx >= len(m.doc.Links) {
+			m.linkIdx = -1
+		}
+		if m.tocCursor >= len(m.doc.Headings) {
+			m.toc, m.tocCursor = false, 0
+		}
+		if m.matchIdx >= len(m.matches) {
+			m.matchIdx = 0
+		}
 		m.status = strings.Join(msg.notes, "; ")
 		return m, tea.Sequence(cmds...)
 
@@ -490,7 +501,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if m.focus == paneDoc && m.linkIdx >= 0 {
 			return m, m.followLink()
 		}
-		if m.focus == paneTree && m.cursor < len(m.nodes) {
+		if m.focus == paneTree && m.cursor >= 0 && m.cursor < len(m.nodes) {
 			n := m.nodes[m.cursor]
 			if n.dir {
 				m.toggle(m.cursor)
@@ -549,6 +560,9 @@ func (m *model) toggle(i int) {
 
 func (m *model) move(s string) {
 	if m.focus == paneTree {
+		if len(m.nodes) == 0 {
+			return
+		}
 		switch s {
 		case "j", "down":
 			m.cursor = min(m.cursor+1, len(m.nodes)-1)
@@ -598,7 +612,9 @@ func (m *model) View() tea.View {
 		return tea.NewView("")
 	}
 	h := m.bodyHeight()
-	header := bar.Width(m.width).Render(ansi.Truncate(fmt.Sprintf(" %s  %s  images=%s %s", path.Base(m.ws.Root), m.path, m.imgMode, pendingMark(m.pending)), m.width, "…"))
+	// Names, paths and messages come from the file system and the user;
+	// they go through the same sanitizer as document text.
+	header := bar.Width(m.width).Render(ansi.Truncate(document.Sanitize(fmt.Sprintf(" %s  %s  images=%s %s", path.Base(m.ws.Root), m.path, m.imgMode, pendingMark(m.pending))), m.width, "…"))
 
 	// Lines are composed and truncated one by one instead of with
 	// lipgloss.JoinHorizontal, which pads every line to the widest one and
@@ -622,7 +638,7 @@ func (m *model) View() tea.View {
 	}
 	body := strings.Join(rows, "\n")
 
-	footer := m.footer()
+	footer := document.Sanitize(m.footer())
 	v := tea.NewView(header + "\n" + body + "\n" + bar.Width(m.width).Render(ansi.Truncate(footer, m.width, "…")))
 	v.AltScreen = true
 	return v

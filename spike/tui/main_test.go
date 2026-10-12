@@ -40,6 +40,8 @@ func key(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: tea.KeyTab}
 	case "backspace":
 		return tea.KeyPressMsg{Code: tea.KeyBackspace}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
 	}
 	r := []rune(s)[0]
 	return tea.KeyPressMsg{Code: r, Text: s}
@@ -300,5 +302,61 @@ func TestHistoryAfterLoadError(t *testing.T) {
 	drive(t, m, key("]"))
 	if m.rendered == nil {
 		t.Fatal("forward lost the document")
+	}
+}
+
+func TestHeaderAndFooterSanitizeNames(t *testing.T) {
+	dir := t.TempDir()
+	name := "x\x1b]8;;file:evil\x07y.md"
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(t, filepath.Join(dir, name))
+	drive(t, m, tea.WindowSizeMsg{Width: 120, Height: 20})
+	m.status = "error: " + name
+	if v := m.View().Content; strings.Contains(v, "\x1b]8;;file") || strings.Contains(v, "\x07") {
+		t.Errorf("control sequence from a file name reached the screen: %q", v)
+	}
+}
+
+func TestEmptyTreeKeys(t *testing.T) {
+	m := newModel(t, t.TempDir())
+	drive(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
+	for _, k := range []string{"j", "enter", "l", "h", "k", "j", "enter"} {
+		drive(t, m, key(k))
+	}
+	screen(t, m)
+}
+
+// Reloading a document that lost links, headings or matches must not leave
+// selections pointing past the new lists.
+func TestSelectionsSurviveShrinkingReload(t *testing.T) {
+	dir := t.TempDir()
+	doc := filepath.Join(dir, "a.md")
+	if err := os.WriteFile(doc, []byte("# A x\n\n[1](#a-x) [2](#b-x) [3](#c-x)\n\n# B x\n\n# C x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(t, doc)
+	drive(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
+	m.focus = paneDoc
+	for range 3 {
+		drive(t, m, key(">"))
+	}
+	drive(t, m, key("/"))
+	drive(t, m, key("x"))
+	drive(t, m, key("enter"))
+	drive(t, m, key("N"))
+	drive(t, m, key("t"))
+	drive(t, m, key("j"))
+	drive(t, m, key("j"))
+
+	if err := os.WriteFile(doc, []byte("plain\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	drive(t, m, tea.WindowSizeMsg{Width: 70, Height: 20}) // reload
+	screen(t, m)
+	for _, k := range []string{"enter", "esc", "enter", "n", "N", ">"} {
+		drive(t, m, key(k))
+		screen(t, m)
 	}
 }
