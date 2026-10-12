@@ -101,7 +101,7 @@ fixture は `testdata/markdown/gfm.md`。
 |---|---|
 | index の書き換え | `--no-optional-locks` と `GIT_OPTIONAL_LOCKS=0` |
 | fsmonitor hook | `-c core.fsmonitor=false` |
-| clean / smudge / process filter | 設定済みの filter driver 名を `git config --get-regexp '^filter\.'` で列挙し、`GIT_CONFIG_COUNT` 経由で clean/smudge/process を空に、required を false にする。`-c` はサブセクション名に `=` を含むと表現できないため使わない |
+| clean / smudge / process filter | 設定済みの filter driver 名を Git 呼び出しのたびに `git config --get-regexp '^filter\.'` で列挙し（起動後に追加された driver にも効かせるため、キャッシュしない）、`GIT_CONFIG_COUNT` 経由で clean/smudge/process を空に、required を false にする。`-c` はサブセクション名に `=` を含むと表現できないため使わない |
 | 外部 diff・textconv | diff 系の呼び出しに `--no-ext-diff --no-textconv` を必須とする |
 | gpg | `-c log.showSignature=false` |
 | pager | `--no-pager`、`GIT_PAGER=cat`、`PAGER=cat` |
@@ -120,7 +120,7 @@ fixture は `testdata/markdown/gfm.md`。
 
 - 方式: goldmark（GFM + Footnote）で `document.Doc` を作る。トップレベルブロックはソース位置順に並べ、各ブロックは次のブロックの開始行までを担当する。Footnote 拡張は定義を AST 末尾へ移すため、AST 順では並べない。Glamour は各ブロックのソースに全参照定義を足して個別に描画し、`Rendered.BlockLine` で行とブロックを対応付ける。
 - 閲覧位置は `Position{Block, Offset}` で表す。幅が変わったときは同じブロックの同じ行オフセットへ戻す（ブロックが短くなった場合は末尾に丸める）。
-- 見出し ID: goldmark 既定の生成器は非 ASCII を落とすため、github-slugger 互換の生成器を使う（日本語・記号・重複の `-1` を検証）。
+- 見出し ID: github-slugger 互換の生成器で、見出しの描画後テキストから作る（日本語・記号・重複の `-1`・リンクやコードを含む見出しを検証）。goldmark の自動 ID は見出しのソースから作られ、非 ASCII も落とすため使わない。
 - ヘッドレステストで成立を確認した操作: リンク選択 → 遷移 → 戻る → 進む、別文書へのリンクと戻る、境界外リンクの拒否、TOC での重複見出しへのジャンプ、検索 → 次/前 → リサイズ後も一致が画面内、A→B の完了順逆転で A を棄却。
 - 制約: リンクの選択表示はブロック単位（ガターの印）で、行内のハイライトはしない。検索は描画後のプレーンテキストに対するリテラル一致。
 - 性能: ブロック単位描画は一括描画より約 10% 遅い（100KiB: 80ms 対 78ms、1MiB: 596ms 対 540ms）。Glamour は内部で再パースするため、パースは 2 回走る。

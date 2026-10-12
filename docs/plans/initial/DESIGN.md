@@ -290,7 +290,7 @@ Gitの状態は非同期に読み取り、完成したスナップショット�
 |---|---|
 | Index・参照の書き換え | `--no-optional-locks`、`GIT_OPTIONAL_LOCKS=0`。working tree を変更するコマンドは呼ばない |
 | fsmonitor hook | `-c core.fsmonitor=false` |
-| filter driver（clean/smudge/process） | 設定済みの driver 名を列挙し、`GIT_CONFIG_COUNT` 経由で clean/smudge/process を空、required を false にする |
+| filter driver（clean/smudge/process） | 設定済みの driver 名を Git 呼び出しのたびに列挙し直し、`GIT_CONFIG_COUNT` 経由で clean/smudge/process を空、required を false にする（起動後に追加された driver も無効化するため、結果をキャッシュしない） |
 | 外部diff・textconv | diff 系の呼び出しには `--no-ext-diff --no-textconv` を必ず付ける |
 | 署名検証 | `-c log.showSignature=false` |
 | pager | `--no-pager`、`GIT_PAGER=cat`、`PAGER=cat` |
@@ -323,7 +323,7 @@ bytes → Goldmark AST (+ dialect extensions)
 - 横に並べるペインは行ごとに切り詰めて合成する。絵文字の幅は端末の幅方式（wcwidth / grapheme）で変わるため、表の完全な整列は保証せず、画面幅を超えないことだけを保証する。
 - PreviewとSourceは同じ入力ファイルに紐づく。Sourceでは行番号とコードハイライトを表示する。
 - 相対リンクは現在の文書基準で解決し、パス逸脱は禁止。`#anchor`は文書内の見出しIDと照合する。
-- 見出しIDは github-slugger 互換（小文字化、文字・数字・`_`・`-`・空白以外を除去、空白を `-`、重複に `-1` 以降）。goldmark 既定の生成器は非 ASCII を落とすため使わない。Azure Wiki固有のアンカー差は明示的に扱う。
+- 見出しIDは github-slugger 互換（小文字化、文字・数字・`_`・`-`・空白以外を除去、空白を `-`、重複に `-1` 以降）で、見出しの Markdown ソースではなく描画後のテキスト（リンク・強調・コードの記法を除いたもの）から作る。goldmark の自動 ID はソースから作られ、非 ASCII も落とすため使わない。Azure Wiki固有のアンカー差は明示的に扱う。
 - HTMLは原則として安全な文字列または対応要素の簡易表現として表示し、JavaScriptを実行しない。
 
 ### 8.2 Azure DevOps Wiki対応
