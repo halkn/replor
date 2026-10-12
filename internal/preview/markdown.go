@@ -109,6 +109,9 @@ func (r *Rendered) BlockAt(line int) int {
 
 // PositionAt converts a line to a Position.
 func (r *Rendered) PositionAt(line int) Position {
+	if len(r.BlockLine) == 0 {
+		return Position{}
+	}
 	b := r.BlockAt(line)
 	return Position{Block: b, Offset: line - r.BlockLine[b]}
 }

@@ -210,3 +210,13 @@ func TestLoadRender(t *testing.T) {
 		t.Logf("size=%dKiB blocks=%d lines=%d parse=%v parse+render=%v renderedBytes=%.1fMiB", len(src)>>10, len(d.Blocks), len(r.Lines), parsed.Round(time.Millisecond), total.Round(time.Millisecond), float64(bytes)/(1<<20))
 	}
 }
+
+func TestEmptyDocument(t *testing.T) {
+	r := render(t, document.Parse(""), 80)
+	if got := r.PositionAt(0); got != (Position{}) {
+		t.Errorf("PositionAt = %+v", got)
+	}
+	if r.LineOf(Position{Block: 3, Offset: 2}) != 0 || r.BlockAt(5) != 0 || r.Find("x") != nil {
+		t.Error("empty rendering lookups")
+	}
+}
