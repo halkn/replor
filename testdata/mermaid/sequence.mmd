@@ -1,0 +1,14 @@
+sequenceDiagram
+    autonumber
+    participant U as ユーザー
+    participant A as アプリ
+    participant G as git
+    U->>A: ファイル選択
+    A->>G: status --porcelain=v2
+    G-->>A: 変更一覧
+    alt 変更あり
+        A->>U: Diff表示
+    else 変更なし
+        A->>U: Preview表示
+    end
+    Note over A,G: 読み取り専用で実行

@@ -1,0 +1,10 @@
+flowchart LR
+    A[ユーザー] -->|起動| B(Workspace解決)
+    B --> C{Git管理下?}
+    C -->|はい| D[Git Snapshot取得]
+    C -->|いいえ| E[ファイル閲覧のみ]
+    D --> F[(キャッシュ)]
+    subgraph UI[表示層]
+      E
+      F
+    end

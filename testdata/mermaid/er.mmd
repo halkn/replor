@@ -1,0 +1,14 @@
+erDiagram
+    WORKSPACE ||--o{ FILE : contains
+    FILE ||--o| GIT_CHANGE : has
+    WORKSPACE {
+        string root "ルートパス"
+        string name
+    }
+    FILE {
+        string path "相対パス"
+        int size
+    }
+    GIT_CHANGE {
+        string kind "staged/unstaged"
+    }
