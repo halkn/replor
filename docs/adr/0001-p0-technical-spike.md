@@ -34,7 +34,7 @@
 | `internal/document` | 制御文字の無害化、AST 索引（ブロック・見出し・リンク）、GitHub 互換アンカー、リンク解決 | 拡張して使う |
 | `internal/preview` | ブロック単位の Markdown 描画、位置変換、検索、画像（Kitty / halfblocks） | 拡張して使う |
 | `internal/app` | `Latest`（古い結果の棄却） | そのまま使う |
-| `spike/tui` | 2 ペイン TUI の試作とヘッドレス操作テスト | P1 の `cmd/wsview` 着手時に削除 |
+| `spike/tui` | 2 ペイン TUI の試作とヘッドレス操作テスト | P1 の `cmd/replor` 着手時に削除 |
 | `spike/mermaid` | Mermaid の SVG/PNG 生成と失敗モードの確認 | P2-04 着手時に削除 |
 | `testdata/` | GFM・Azure Wiki・Mermaid・画像の合成 fixture | そのまま使う |
 
@@ -204,17 +204,17 @@ fixture は `testdata/markdown/gfm.md`。
 ビルド:
 
 ```sh
-CGO_ENABLED=0 go build -o wsview-spike ./spike/tui
+CGO_ENABLED=0 go build -o replor-spike ./spike/tui
 ```
 
 Ghostty（macOS）で次を確認する。P1 着手の条件はこの確認だけとする。Windows Terminal + WSL2 はベストエフォート（任意の P3-02）とし、Linux 固有の確認（Git 版・負荷・Linux バイナリの起動）は P1-00 の CI で行う。
 
-1. `./wsview-spike testdata/markdown/gfm.md` を起動し、表・日本語・絵文字の行で罫線と右端が崩れないことを確認する。
+1. `./replor-spike testdata/markdown/gfm.md` を起動し、表・日本語・絵文字の行で罫線と右端が崩れないことを確認する。
 2. ウィンドウを細くしたり広げたりして、ツリーが 70 桁未満で消え、本文が折り返し直されることを確認する。
 3. `Tab` で本文へ移り、`>` で `data` リンクを選んで `Enter` を押し、`Backspace` で戻り、`]` で進む。
 4. `t` で TOC を開き、2 つ目の「重複見出し」に `Enter` で移動する。
 5. `/` で `書生` と入力して `Enter` を押し、`n`/`N` で移動したあとウィンドウ幅を変えても、一致した行が画面内に残ることを確認する。
-6. `./wsview-spike testdata/markdown/media.md` を起動し、Kitty 画像で表示されることを確認する。続けて次を確認する。
+6. `./replor-spike testdata/markdown/media.md` を起動し、Kitty 画像で表示されることを確認する。続けて次を確認する。
    - `j`/`k` でスクロールすると、図が本文と一緒に動いて端で欠けること。
    - リサイズで図が描き直されること。
    - `q` で終了したあと画面に図が残らないこと。

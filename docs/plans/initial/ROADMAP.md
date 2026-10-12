@@ -3,7 +3,7 @@
 - Status: Proposed（P0 完了。次は P1 の実装計画）
 - Version: 0.2
 - Date: 2026-10-12
-- Product name: 未決定（`wsview`は仮称）
+- Product name: `replor`（実行ファイル名も同じ）
 - Related: [DESIGN.md](DESIGN.md), [ADR-0001 P0 技術 Spike の採否](../../adr/0001-p0-technical-spike.md)
 
 ## 1. ロードマップ方針
@@ -69,7 +69,7 @@
 | ID | 作業項目 | スコープ | 受け入れ条件 | 依存 |
 |---|---|---|---|---|
 | P1-00 | 基本CI | Go build、fmt差分検査、vet、test、Linux 固有の確認 | P1の最初からmacOS/Linuxで実行でき、以後の結合テストを継続実行する。Linux では `ubuntu:24.04` コンテナの同梱 Git でも `internal/git` のテストが通り、`CGO_ENABLED=0` のバイナリが起動し、`REPLOR_LOAD=1` の計測結果を ADR-0001 3.5 に追記する | P0-07 |
-| P1-01 | CLI起動とWorkspace検出 | `wsview [PATH]`、Git管理外、ファイル指定、worktree | 各条件で正常起動。サブディレクトリ境界とsymlink逸脱拒否を検証 | P0-01, P0-08 |
+| P1-01 | CLI起動とWorkspace検出 | `replor [PATH]`、Git管理外、ファイル指定、worktree | 各条件で正常起動。サブディレクトリ境界とsymlink逸脱拒否を検証 | P0-01, P0-08 |
 | P1-02 | ファイルツリー | 階層表示、折りたたみ、ignoreの扱い | 追跡済み・無視・明示指定・削除を区別し、巨大ディレクトリでも上限内で操作できる。ディレクトリ列挙も非同期 | P1-01 |
 | P1-03 | ファイルファインダー | 独立した非同期パス列挙、ファジー検索、Enterで開く | 未展開ディレクトリも検索可能。列挙中・部分結果（20万件・深さ 64）を明示し、フィルタ変更で旧列挙を破棄 | P1-02 |
 | P1-04 | テキスト／コードプレビュー | Markdown Preview/Source、テキスト/ソース、構文ハイライト、GitHub Alert と脚注の表示 | 日本語・長い行・空・巨大（Preview 1 MiB / Source 8 MiB）・バイナリを扱い、本文・名前・エラーの端末制御文字を無害化。http/https 以外の OSC 8 を除去し、ローカルリンクの URL を併記しない。選択／編集／幅変更の順序逆転で誤表示しない | P1-01, P0-02, P0-03, P0-09 |
@@ -82,7 +82,7 @@
 
 **P1完了条件（MVP Definition of Done）**
 
-- `wsview .`だけで起動し、README・コードを選択して読める。
+- `replor .`だけで起動し、README・コードを選択して読める。
 - キー操作だけでファイル検索・文書内検索と次/前・プレビュー・Diff・戻る/進む操作を行える。
 - Git statusと分岐元との差分が整合し、非Gitフォルダでも閲覧できる。
 - ファイル更新時、UIを起動し直さず再表示でき、監視無効時も`r`で更新できる。連続操作や完了順の逆転で別の内容を表示しない。
@@ -181,4 +181,4 @@ P1内は基本CIと境界を先に整備し、Files・Working Changes・更新�
 ## 11. 次の着手作業
 
 1. P1 の具体的な実装計画を確定する（P1-00 の CI で Linux 固有の確認を行い、上限値を見直す）。
-2. P1 着手時に `spike/tui` を削除し、`internal/*` を `cmd/wsview` から使う。`spike/mermaid` は P2-04 着手時に削除する。
+2. P1 着手時に `spike/tui` を削除し、`internal/*` を `cmd/replor` から使う。`spike/mermaid` は P2-04 着手時に削除する。

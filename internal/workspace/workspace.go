@@ -52,7 +52,7 @@ func Open(arg string) (*Workspace, error) {
 	w := &Workspace{Root: resolved}
 	if !info.IsDir() {
 		// The selection is taken from the name as given, not from the link
-		// target, so `wsview link.md` selects link.md next to it.
+		// target, so `replor link.md` selects link.md next to it.
 		w.Root, err = filepath.EvalSymlinks(filepath.Dir(abs))
 		if err != nil {
 			return nil, err

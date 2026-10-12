@@ -5,7 +5,7 @@
 - Date: 2026-10-12
 - Language: Go
 - UI: Bubble Tea v2
-- Project / executable name: **未決定**（本書では `wsview` を仮称とする）
+- Project / executable name: `replor`（リポジトリ名と同じ）
 - Related: [ROADMAP.md](ROADMAP.md), [ADR-0001 P0 技術 Spike の採否](../../adr/0001-p0-technical-spike.md)
 
 ## 1. 背景と目的
@@ -61,7 +61,7 @@ gh-miniの「ディレクトリを開いて、ファイル・README・Git差分�
 
 ## 3. 主要ユースケース
 
-1. `wsview .`で起動し、READMEや設計文書を閲覧する。
+1. `replor .`で起動し、READMEや設計文書を閲覧する。
 2. ツリー／ファイルファインダーから任意のソースコードへ移動する。
 3. MarkdownのTOCと相対リンクをたどり、元の表示位置へ戻る。
 4. 現在の未コミット変更からファイルを選択しDiffを確認する。
@@ -157,7 +157,7 @@ flowchart TB
 ### 5.2 パッケージ構成（初期案）
 
 ```text
-cmd/wsview/main.go
+cmd/replor/main.go
 internal/
   app/              # Bubble Tea Model / Msg / Cmd、画面遷移
   ui/               # tree, viewport, finder, changes, help
@@ -202,11 +202,11 @@ go.sum
 
 ### 6.1 起動と境界
 
-- `wsview [PATH]`。PATH省略時はカレントディレクトリ。単一ファイルも受け付け、親ディレクトリをWorkspaceの起点にして指定ファイルを選択。
+- `replor [PATH]`。PATH省略時はカレントディレクトリ。単一ファイルも受け付け、親ディレクトリをWorkspaceの起点にして指定ファイルを選択。
 - Gitリポジトリ外でもファイル閲覧は可能。Git機能を非表示またはUnavailableとして表示。
 - 指定ディレクトリ（ファイル指定なら親）をWorkspace rootとし、表示rootと読み取り境界を一致させる。起動時にrootを解決・固定し、その配下からのシンボリックリンクによる境界外参照は拒否する。
 - Git rootはWorkspaceを含むリポジトリのrootとして別に保持する。Changes・件数・ファイル検索はWorkspace内に限定し、パスをGit root基準へ変換する。境界をまたぐrenameは範囲内側だけを閲覧可能にし、他方は範囲外と表示する。
-- `wsview docs/`から`../README.md`は開かず、理由とリポジトリrootから起動する方法を表示する。リンク、履歴、画像から読み取り境界を自動拡大しない。
+- `replor docs/`から`../README.md`は開かず、理由とリポジトリrootから起動する方法を表示する。リンク、履歴、画像から読み取り境界を自動拡大しない。
 - Wiki rootはroot-relativeリンクの解決基準として別に保持する。v1ではAzure WikiモードのWorkspace rootをWiki rootとし、公開Wikiのサブフォルダはそのフォルダを指定して起動する。部分的なフォルダ起動ではWiki全体のリンク互換を保証しない。
 - ファイルアクセスはすべて `os.Root` 経由で行う。`os.Root` はルート内を指していても絶対パスの symlink を辿らないため、v1 ではこれを「辿れない symlink」として理由付きで表示する。Git管理ディレクトリがworktreeの外側にあるケースはGit CLIを通じて扱う。
 - バイナリ・巨大ファイルはサイズ／種類を判定し、全文読み込みを避ける。Markdown Preview は 1 MiB まで（超えたら Source 表示に切り替えて理由を出す）、Source 表示の読み取りは 8 MiB まで（超えたら「大きすぎる」と表示）。
@@ -412,13 +412,13 @@ Render new View
 ## 10. CLIと設定
 
 ```sh
-wsview                 # カレントディレクトリ
-wsview .               # 指定ディレクトリ
-wsview docs/           # サブディレクトリ
-wsview README.md       # 指定ファイルを選択して起動
-wsview --flavor azure-wiki
-wsview --images off    # auto（既定）/ kitty / halfblocks / off
-wsview --no-watch
+replor                 # カレントディレクトリ
+replor .               # 指定ディレクトリ
+replor docs/           # サブディレクトリ
+replor README.md       # 指定ファイルを選択して起動
+replor --flavor azure-wiki
+replor --images off    # auto（既定）/ kitty / halfblocks / off
+replor --no-watch
 ```
 
 - オプションは必要になったものだけ実装し、設定のための設定を増やさない。
