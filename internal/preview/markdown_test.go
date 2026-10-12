@@ -55,9 +55,6 @@ func TestNavigationScenario(t *testing.T) {
 	d := gfmDoc(t)
 	r := render(t, d, 80)
 
-	type entry struct{ pos Position }
-	var history []entry
-
 	// Reader is two lines into the paragraph under 日本語長文.
 	cur := Position{Block: mustHeading(t, d, "日本語長文").Block + 1, Offset: 2}
 	want := r.Plain[r.LineOf(cur)]
@@ -73,14 +70,14 @@ func TestNavigationScenario(t *testing.T) {
 	if !ok {
 		t.Fatal("anchor not found")
 	}
-	history = append(history, entry{cur})
+	saved := cur
 	cur = Position{Block: h.Block}
 	if got := r.Plain[r.LineOf(cur)]; !strings.Contains(got, "Data Flow") {
 		t.Fatalf("after link: %q", got)
 	}
 
 	// Back restores the previous position exactly.
-	cur, history = history[len(history)-1].pos, history[:len(history)-1]
+	cur = saved
 	if got := r.Plain[r.LineOf(cur)]; got != want || got == "" {
 		t.Fatalf("after back: %q", got)
 	}
