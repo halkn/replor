@@ -9,6 +9,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/extension"
+	extast "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/parser"
 	"github.com/yuin/goldmark/text"
 )
@@ -24,6 +25,17 @@ type Block struct {
 	// Image is the destination when the block is a paragraph holding only
 	// one image.
 	Image string
+	// Alert is the GitHub alert kind (NOTE, TIP, IMPORTANT, WARNING,
+	// CAUTION) of a block quote that starts with the alert marker.
+	Alert string
+	// Footnotes is set on the footnote list block.
+	Footnotes []Footnote
+}
+
+// Footnote is one footnote definition.
+type Footnote struct {
+	Ref  string // label as written, e.g. "1" or "note"
+	Text string
 }
 
 // Heading is a heading anywhere in the document with its GitHub-style ID.
@@ -95,6 +107,14 @@ func Parse(src string) *Doc {
 			if img, ok := v.FirstChild().(*ast.Image); ok && v.ChildCount() == 1 {
 				b.Image = string(img.Destination)
 			}
+		case *ast.Blockquote:
+			b.Alert = alertKind(source[t.start:])
+		case *extast.FootnoteList:
+			for c := v.FirstChild(); c != nil; c = c.NextSibling() {
+				if fn, ok := c.(*extast.Footnote); ok {
+					b.Footnotes = append(b.Footnotes, Footnote{Ref: string(fn.Ref), Text: plainText(fn, source)})
+				}
+			}
 		}
 		if i == 0 {
 			b.Start = 0
@@ -136,6 +156,24 @@ func Parse(src string) *Doc {
 	}
 	d.RefDefs = refs.String()
 	return d
+}
+
+var alertKinds = map[string]bool{"NOTE": true, "TIP": true, "IMPORTANT": true, "WARNING": true, "CAUTION": true}
+
+// alertKind reads the first line of a block quote. GitHub only treats the
+// marker as an alert when it stands alone on that line.
+func alertKind(src []byte) string {
+	line, _, _ := bytes.Cut(src, []byte("\n"))
+	s := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(line)), ">"))
+	inner, ok := strings.CutPrefix(s, "[!")
+	if !ok {
+		return ""
+	}
+	kind, ok := strings.CutSuffix(inner, "]")
+	if k := strings.ToUpper(kind); ok && alertKinds[k] {
+		return k
+	}
+	return ""
 }
 
 // BlockSource returns the source of block i.
