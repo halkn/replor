@@ -15,6 +15,7 @@ var keyHelp = [][2]string{
 	{"PgDn / PgUp, g / G", "page / jump to the start or end"},
 	{"h / l, ← / →", "collapse / expand a directory (h moves to the parent)"},
 	{"Enter", "open the selected file or directory, follow the selected link"},
+	{"f", "find a file by name (type to filter, ↑/↓ to choose, Enter to open)"},
 	{"> / <", "select the next / previous link in the document"},
 	{"Backspace / ]", "go back / forward in history"},
 	{"/", "search in the document (Enter to search, Esc to cancel)"},
@@ -40,6 +41,8 @@ func (m *Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case overlayTOC:
 		return m, m.tocKey(s)
+	case overlayFinder:
+		return m, m.finderKey(k)
 	case overlayHelp:
 		if s == "esc" || s == "q" || s == "?" {
 			m.overlay = overlayNone
@@ -68,6 +71,8 @@ func (m *Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.load()
 	case "?":
 		m.overlay = overlayHelp
+	case "f":
+		return m, m.openFinder()
 	case "/":
 		if v.rendered() == nil {
 			m.status = "nothing to search"

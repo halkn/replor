@@ -67,3 +67,22 @@ func (l *Latest) NewGeneration() {
 		delete(l.cancel, k)
 	}
 }
+
+// Current reports whether t is still the newest request without releasing
+// it, for requests that deliver several results (streamed batches).
+func (l *Latest) Current(t Ticket) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return t.Gen == l.gen && t.Seq == l.seq[t.Key]
+}
+
+// Cancel invalidates and cancels the outstanding request for key.
+func (l *Latest) Cancel(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.seq[key]++
+	if c := l.cancel[key]; c != nil {
+		c()
+		delete(l.cancel, key)
+	}
+}

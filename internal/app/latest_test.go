@@ -76,3 +76,17 @@ func TestLatestUnderContention(t *testing.T) {
 		t.Errorf("applied %v, want only %d", applied, tickets[n-1].Seq)
 	}
 }
+
+func TestLatestCurrentAndCancel(t *testing.T) {
+	l := NewLatest()
+	tk, ctx := l.Issue(context.Background(), "finder")
+	for range 2 {
+		if !l.Current(tk) || ctx.Err() != nil {
+			t.Fatal("Current must not release the ticket")
+		}
+	}
+	l.Cancel("finder")
+	if l.Current(tk) || ctx.Err() == nil || l.Accept(tk) {
+		t.Error("Cancel did not invalidate the request")
+	}
+}

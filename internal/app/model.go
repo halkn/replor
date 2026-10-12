@@ -51,6 +51,7 @@ const (
 	overlaySearch
 	overlayTOC
 	overlayHelp
+	overlayFinder
 )
 
 // Model is the Bubble Tea model of the application.
@@ -65,6 +66,7 @@ type Model struct {
 
 	tree   tree
 	viewer viewer
+	finder finder
 
 	back, fwd []HistoryEntry
 
@@ -100,6 +102,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyDir(msg)
 	case loadedMsg:
 		return m, m.applyLoad(msg)
+	case finderBatchMsg:
+		return m, m.applyFinderBatch(msg)
+	case finderRankedMsg:
+		m.applyRanked(msg)
+		return m, nil
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
