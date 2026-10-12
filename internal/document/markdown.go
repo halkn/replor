@@ -55,7 +55,6 @@ type Doc struct {
 
 var md = goldmark.New(
 	goldmark.WithExtensions(extension.GFM, extension.Footnote),
-	goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 )
 
 // Parse builds a Doc. The source is sanitized first; all offsets refer to
@@ -63,7 +62,7 @@ var md = goldmark.New(
 func Parse(src string) *Doc {
 	src = Sanitize(src)
 	source := []byte(src)
-	ctx := parser.NewContext(parser.WithIDs(newGitHubIDs()))
+	ctx := parser.NewContext()
 	root := md.Parser().Parse(text.NewReader(source), parser.WithContext(ctx))
 
 	// The footnote extension moves definitions to a list at the end of the
@@ -106,6 +105,9 @@ func Parse(src string) *Doc {
 		d.Blocks = append(d.Blocks, b)
 	}
 
+	// IDs come from the heading's text content like on GitHub; goldmark's
+	// auto IDs are built from the raw Markdown source of the heading.
+	ids := newGitHubIDs()
 	for bi, t := range tops {
 		_ = ast.Walk(t.node, func(c ast.Node, entering bool) (ast.WalkStatus, error) {
 			if !entering {
@@ -113,9 +115,8 @@ func Parse(src string) *Doc {
 			}
 			switch v := c.(type) {
 			case *ast.Heading:
-				id, _ := v.AttributeString("id")
-				idb, _ := id.([]byte)
-				d.Headings = append(d.Headings, Heading{Block: bi, Level: v.Level, ID: string(idb), Text: plainText(v, source)})
+				text := plainText(v, source)
+				d.Headings = append(d.Headings, Heading{Block: bi, Level: v.Level, ID: ids.next(text), Text: text})
 			case *ast.Link:
 				d.Links = append(d.Links, DocLink{Block: bi, Dest: string(v.Destination), Text: plainText(v, source)})
 			case *ast.AutoLink:

@@ -93,3 +93,15 @@ func TestParseStructure(t *testing.T) {
 		t.Error("ESC survived parsing")
 	}
 }
+
+// Anchors come from the heading's rendered text, not its Markdown source.
+func TestHeadingIDsIgnoreInlineSyntax(t *testing.T) {
+	d := Parse("# [Title](https://example.com)\n\n## `code` and *em*\n\n# Title\n")
+	var ids []string
+	for _, h := range d.Headings {
+		ids = append(ids, h.ID)
+	}
+	if want := "title,code-and-em,title-1"; strings.Join(ids, ",") != want {
+		t.Errorf("ids = %v, want %s", ids, want)
+	}
+}
