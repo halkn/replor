@@ -25,7 +25,7 @@
 
 ## テストの方針
 
-- **TUI**: Bubble Tea の Model を `Update` と `View` で直接駆動して検証する。全行が画面幅に収まることを、wcwidth と grapheme の両方式で検査する。例は `spike/tui/main_test.go` の `drive` と `screen`。端末（pty）が要る起動確認は、CI の `linux-distro` ジョブと手動手順（ADR-0001 5章）で行う。
+- **TUI**: Bubble Tea の Model を `Update` と `View` で直接駆動して検証する。全行が画面幅に収まることを、wcwidth と grapheme の両方式で検査する。ヘルパーは `internal/app/app_test.go` の `drive`・`run`・`screen`。端末（pty）が要る起動確認は、CI の `linux-distro` ジョブと各 PR の手動手順で行う。
 - **git を使うテスト**: `HOME`・`XDG_CONFIG_HOME`・`GIT_CONFIG_GLOBAL`・`GIT_CONFIG_NOSYSTEM` を一時ディレクトリへ向けて隔離する（`internal/git/git_test.go` の `hermetic`）。開発者の global 設定（hook、`safe.bareRepository`、diff の表示設定など）が fixture の作成や結果に混ざらないようにするため。
 - **悪意ある入力**: Workspace 境界・Git 実行契約・端末出力の無害化に関わる変更には、逸脱・外部実行・制御文字を含む入力のテストを付ける。
 

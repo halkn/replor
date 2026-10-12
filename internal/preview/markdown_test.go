@@ -24,7 +24,7 @@ func gfmDoc(t testing.TB) *document.Doc {
 
 func render(t testing.TB, d *document.Doc, width int) *Rendered {
 	t.Helper()
-	r, err := RenderMarkdown(d, width, nil)
+	r, err := RenderMarkdown(d, Options{Width: width})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,5 +218,54 @@ func TestEmptyDocument(t *testing.T) {
 	}
 	if r.LineOf(Position{Block: 3, Offset: 2}) != 0 || r.BlockAt(5) != 0 || r.Find("x") != nil {
 		t.Error("empty rendering lookups")
+	}
+}
+
+func TestGlamourGapsAreFilled(t *testing.T) {
+	d := gfmDoc(t)
+	all := strings.Join(render(t, d, 80).Plain, "\n")
+	for _, want := range []string{"Note", "Warning", "一つ目の脚注。", "名前付き脚注。", "https://example.com/ref"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	// Alert markers and the URL of local links are not shown.
+	for _, bad := range []string{"[!NOTE]", "[!WARNING]", "other.md"} {
+		if strings.Contains(all, bad) {
+			t.Errorf("unexpected %q", bad)
+		}
+	}
+	for _, l := range render(t, d, 80).Plain {
+		if strings.Contains(l, "Note") && strings.Contains(l, "Alert") {
+			t.Errorf("alert label shares a line with the body: %q", l)
+		}
+	}
+	img := strings.Join(render(t, document.Parse("![図](img/a.png) and [t](a.md) and [w](https://example.com/w)\n"), 80).Plain, "\n")
+	if strings.Contains(img, "img/a.png") || strings.Contains(img, "a.md") || !strings.Contains(img, "https://example.com/w") {
+		t.Errorf("hrefs: %q", img)
+	}
+}
+
+func TestPartialRenderIsPrefixOfFull(t *testing.T) {
+	d := gfmDoc(t)
+	full := render(t, d, 80)
+	part, err := RenderMarkdown(d, Options{Width: 80, Blocks: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if part.Complete || !full.Complete {
+		t.Fatalf("complete flags: part=%v full=%v", part.Complete, full.Complete)
+	}
+	if len(part.BlockLine) != 5 || len(part.Lines) == 0 || len(part.Lines) >= len(full.Lines) {
+		t.Fatalf("partial blocks=%d lines=%d", len(part.BlockLine), len(part.Lines))
+	}
+	for i, l := range part.Lines {
+		if l != full.Lines[i] {
+			t.Fatalf("line %d differs", i)
+		}
+	}
+	// Positions beyond the rendered part clamp to its end.
+	if got := part.LineOf(Position{Block: 10}); got != len(part.Lines)-1 && part.BlockAt(got) != 4 {
+		t.Errorf("LineOf beyond part = %d", got)
 	}
 }

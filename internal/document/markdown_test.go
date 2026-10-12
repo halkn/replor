@@ -105,3 +105,31 @@ func TestHeadingIDsIgnoreInlineSyntax(t *testing.T) {
 		t.Errorf("ids = %v, want %s", ids, want)
 	}
 }
+
+func TestAlertsAndFootnotes(t *testing.T) {
+	d := loadGFM(t)
+	var alerts []string
+	var notes []Footnote
+	for _, b := range d.Blocks {
+		if b.Alert != "" {
+			alerts = append(alerts, b.Alert)
+		}
+		notes = append(notes, b.Footnotes...)
+	}
+	if strings.Join(alerts, ",") != "NOTE,WARNING" {
+		t.Errorf("alerts = %v", alerts)
+	}
+	if len(notes) != 2 || notes[0].Ref != "1" || notes[0].Text != "一つ目の脚注。" || notes[1].Ref != "note" {
+		t.Errorf("footnotes = %+v", notes)
+	}
+
+	// Only a marker alone on the first quoted line makes an alert.
+	for _, src := range []string{"> [!NOTE] inline text\n", "> text\n> [!NOTE]\n", "> [!UNKNOWN]\n> x\n"} {
+		if a := Parse(src).Blocks[0].Alert; a != "" {
+			t.Errorf("%q: alert %q", src, a)
+		}
+	}
+	if a := Parse("> [!tip]\n> lower case\n").Blocks[0].Alert; a != "TIP" {
+		t.Errorf("lower case alert = %q", a)
+	}
+}

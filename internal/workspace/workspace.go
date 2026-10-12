@@ -129,6 +129,13 @@ func (w *Workspace) ReadFile(rel string, max int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Opening a FIFO or device can block or have side effects, so the type is
+	// checked before open; the check after open guards against a swap.
+	if info, err := w.root.Stat(p); err != nil {
+		return nil, wrap(err)
+	} else if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: not a regular file", rel)
+	}
 	f, err := w.root.Open(p)
 	if err != nil {
 		return nil, wrap(err)

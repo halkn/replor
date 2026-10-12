@@ -34,7 +34,7 @@
 | `internal/document` | 制御文字の無害化、AST 索引（ブロック・見出し・リンク）、GitHub 互換アンカー、リンク解決 | 拡張して使う |
 | `internal/preview` | ブロック単位の Markdown 描画、位置変換、検索、画像（Kitty / halfblocks） | 拡張して使う |
 | `internal/app` | `Latest`（古い結果の棄却） | そのまま使う |
-| `spike/tui` | 2 ペイン TUI の試作とヘッドレス操作テスト | P1 の `cmd/replor` 着手時に削除 |
+| `spike/tui` | 2 ペイン TUI の試作とヘッドレス操作テスト | P1 で削除済み。実装は `internal/app`・`cmd/replor`、テストは `internal/app/app_test.go` に移した |
 | `spike/mermaid` | Mermaid の SVG/PNG 生成と失敗モードの確認 | P2-04 着手時に削除 |
 | `testdata/` | GFM・Azure Wiki・Mermaid・画像の合成 fixture | そのまま使う |
 
@@ -202,6 +202,8 @@ fixture は `testdata/markdown/gfm.md`。
 | submodule の dirty 判定 | 表示しない（gitlink の OID 変更だけを表示） |
 
 ## 5. 手動確認の手順（Ghostty で実施済み、2026-10-12）
+
+`spike/tui` は P1 で削除した。同じ手順は `go build ./cmd/replor` のバイナリで再現できる。違いはツリーの表示切替が `b` から `e` になったことと、Mermaid が P2-04 まで画像ではなくコードブロックとして表示されることだけ。
 
 ビルド:
 
