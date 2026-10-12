@@ -55,12 +55,12 @@
 | P0-03 | 完了。ブロック単位描画＋AST 索引を採用し、リンク・戻る/進む・TOC・検索・リサイズ復元が成立 | — |
 | P0-04 | 条件付き採用。go-mermaid の SVG は 3 図種とも可。PNG は日本語が豆腐になり、フォントのフォールバックで解消できることを試作で確認 | P2-04 で raster を内製化 |
 | P0-05 | 完了。Kitty placeholder / halfblocks / off を採用し、ヘッドレスと Ghostty で確認 | Windows Terminal は任意（P3-02） |
-| P0-06 | CGo 不要で 4 ターゲットをビルドできた | Linux 版の実行確認（P1-00 の CI） |
-| P0-08 | 完了。境界・Git 実行契約・最低 Git 2.31（partial clone は 2.45）・Wiki fixture | Linux 同梱 Git でのテスト（P1-00 の CI） |
-| P0-09 | 完了（macOS）。上限と同時実行数を決定 | Linux での再計測（P1-00 の CI） |
+| P0-06 | CGo 不要で 4 ターゲットをビルドでき、Linux 版の起動も CI で確認した | — |
+| P0-08 | 完了。境界・Git 実行契約・最低 Git 2.31（partial clone は 2.45）・Wiki fixture | — （CI の Git 2.43.0 でも通過） |
+| P0-09 | 完了。上限と同時実行数を決定し、Linux CI でも再計測した | — |
 | P0-07 | ADR-0001 を作成し、Ghostty での確認結果を追記 | — |
 
-**ゲート判定: 通過（2026-10-12）。** 描画方式・境界・Git 実行契約・上限・Mermaid/画像の方式とフォールバックが確定し、Ghostty での手動確認（ADR-0001 5章）も問題なく完了した。Linux 固有の確認は P1-00 の受け入れ条件で行う。Windows Terminal + WSL はベストエフォートとし、任意項目の P3-02 で扱う。
+**ゲート判定: 通過（2026-10-12）。** 描画方式・境界・Git 実行契約・上限・Mermaid/画像の方式とフォールバックが確定し、Ghostty での手動確認（ADR-0001 5章）も問題なく完了した。Linux 固有の確認は P1-00 の CI で完了した。Windows Terminal + WSL はベストエフォートとし、任意項目の P3-02 で扱う。
 
 ## 4. P1 — Local MVP（v0.1）
 
@@ -68,11 +68,11 @@
 
 | ID | 作業項目 | スコープ | 受け入れ条件 | 依存 |
 |---|---|---|---|---|
-| P1-00 | 基本CI | Go build、fmt差分検査、vet、test、Linux 固有の確認 | P1の最初からmacOS/Linuxで実行でき、以後の結合テストを継続実行する。Linux では `ubuntu:24.04` コンテナの同梱 Git でも `internal/git` のテストが通り、`CGO_ENABLED=0` のバイナリが起動し、`REPLOR_LOAD=1` の計測結果を ADR-0001 3.5 に追記する | P0-07 |
+| P1-00 | 基本CI（完了） | Go build、fmt差分検査、vet、test、Linux 固有の確認 | P1の最初からmacOS/Linuxで実行でき、以後の結合テストを継続実行する。Linux では `ubuntu:24.04` コンテナの同梱 Git でも `internal/git` のテストが通り、`CGO_ENABLED=0` のバイナリが起動し、`REPLOR_LOAD=1` の計測結果を ADR-0001 3.5 に追記する | P0-07 |
 | P1-01 | CLI起動とWorkspace検出 | `replor [PATH]`、Git管理外、ファイル指定、worktree | 各条件で正常起動。サブディレクトリ境界とsymlink逸脱拒否を検証 | P0-01, P0-08 |
 | P1-02 | ファイルツリー | 階層表示、折りたたみ、ignoreの扱い | 追跡済み・無視・明示指定・削除を区別し、巨大ディレクトリでも上限内で操作できる。ディレクトリ列挙も非同期 | P1-01 |
 | P1-03 | ファイルファインダー | 独立した非同期パス列挙、ファジー検索、Enterで開く | 未展開ディレクトリも検索可能。列挙中・部分結果（20万件・深さ 64）を明示し、フィルタ変更で旧列挙を破棄 | P1-02 |
-| P1-04 | テキスト／コードプレビュー | Markdown Preview/Source、テキスト/ソース、構文ハイライト、GitHub Alert と脚注の表示 | 日本語・長い行・空・巨大（Preview 1 MiB / Source 8 MiB）・バイナリを扱い、本文・名前・エラーの端末制御文字を無害化。http/https 以外の OSC 8 を除去し、ローカルリンクの URL を併記しない。選択／編集／幅変更の順序逆転で誤表示しない | P1-01, P0-02, P0-03, P0-09 |
+| P1-04 | テキスト／コードプレビュー | Markdown Preview/Source、テキスト/ソース、構文ハイライト、GitHub Alert と脚注の表示、大きな文書での表示範囲からの先行描画（1MiB で 2.4 秒かかる環境がある） | 日本語・長い行・空・巨大（Preview 1 MiB / Source 8 MiB）・バイナリを扱い、本文・名前・エラーの端末制御文字を無害化。http/https 以外の OSC 8 を除去し、ローカルリンクの URL を併記しない。選択／編集／幅変更の順序逆転で誤表示しない | P1-01, P0-02, P0-03, P0-09 |
 | P1-05 | 基本ナビゲーション | フォーカス、戻る/進む履歴、文書内検索と次/前、Help、ペイン切替、リンク選択キーの確定 | 検索一致と閲覧位置を復元でき、リサイズ後も注目対象（一致・選択リンク）が画面内に残る。進む履歴の破棄、入力中のキー分離、読み込みエラー後の履歴・リンク・検索操作を検証 | P1-02, P1-04 |
 | P1-06 | Git Status | staged/unstaged/untracked/ignored/rename/delete/conflict、submodule の gitlink 変更 | 状態・NUL区切りの特殊名・境界内件数がfixtureと一致。Git非導入・2.31 未満・2.45 未満の partial clone・`safe.directory`・非Gitを区別し、副作用抑止（DESIGN 7.3）を検証 | P1-01, P0-08 |
 | P1-07 | ChangesビューとDiff | 変更一覧、ファイル別unified diff、staged/unstaged切替 | 同一パスのstaged/unstaged、初回コミット前、削除、conflict、submoduleを設計7.1どおり表示。一覧とdiffのrevisionが一致 | P1-06 |
@@ -180,5 +180,5 @@ P1内は基本CIと境界を先に整備し、Files・Working Changes・更新�
 
 ## 11. 次の着手作業
 
-1. P1 の具体的な実装計画を確定する（P1-00 の CI で Linux 固有の確認を行い、上限値を見直す）。
+1. P1 の具体的な実装計画を確定する。P1-00（基本 CI）は完了している（`Makefile`・`.github/workflows/ci.yml`・`docs/development.md`）。
 2. P1 着手時に `spike/tui` を削除し、`internal/*` を `cmd/replor` から使う。`spike/mermaid` は P2-04 着手時に削除する。

@@ -1,6 +1,6 @@
 # ADR-0001: P0 技術 Spike の採否
 
-- Status: Accepted（macOS / Ghostty の実機確認済み。Linux は P1-00 の CI で確認する）
+- Status: Accepted（macOS / Ghostty の実機確認済み。Linux は CI で確認済み）
 - Date: 2026-10-12
 - Scope: [ROADMAP](../plans/initial/ROADMAP.md) P0-01〜P0-09
 - 計測環境: macOS（Apple Silicon）、Go 1.27.1、Apple Git 2.50.1、go.mod の依存版（bubbletea v2.1.0 / glamour v2.0.1 / lipgloss v2.0.6 / goldmark v1.8.6 / go-mermaid v0.1.6）
@@ -17,11 +17,11 @@
 | Workspace 境界 | `os.Root` で全ファイルアクセスを行う | 採用 |
 | Git 実行契約 | 3.3 の引数・環境変数・filter 無効化。最低 Git 2.31、partial clone は 2.45 以上 | 採用 |
 | 非同期 | 表示先ごとに最新要求だけを受理する `app.Latest`（generation + 連番 + cancel） | 採用 |
-| 上限 | 3.5 の数値で P1 を開始する | 採用（Linux CI で再計測） |
+| 上限 | 3.5 の数値で P1 を開始する | 採用（Linux CI で再計測済み） |
 | Mermaid | go-mermaid を条件付きで採用。PNG 化は日本語非対応のため、フォールバックフォントを入れた raster の内製版が前提 | 条件付き |
 | 画像表示 | Kitty Unicode placeholder／halfblocks／off の 3 段。Sixel・iTerm2 は v1 対象外 | 採用（Ghostty で確認済み） |
 | 画像ライブラリ | go-termimg は不採用。placeholder と転送は `internal/preview` に約 100 行で持つ | 不採用 |
-| 配布 | CGo 不要。darwin/linux × amd64/arm64 を `CGO_ENABLED=0` でビルド可能 | 採用（Linux 実行は P1-00 の CI で確認） |
+| 配布 | CGo 不要。darwin/linux × amd64/arm64 を `CGO_ENABLED=0` でビルド可能 | 採用（Linux 実行は CI で確認済み） |
 | 対象環境 | macOS は保証、Linux は CI で動作確認、Windows Terminal + WSL はベストエフォート（検証環境がないため） | 採用 |
 
 ## 2. Spike の成果物
@@ -113,7 +113,7 @@ fixture は `testdata/markdown/gfm.md`。
 | 所有者の異なるリポジトリ | `safe.directory` による拒否を Unavailable（理由付き）として扱う |
 
 - 最低対応 Git は **2.31**。`GIT_CONFIG_COUNT`（2.31、RelNotes 2.31.0）が必須のため。partial clone のみ **2.45**（`--no-lazy-fetch`、RelNotes 2.45.0）。
-- 実行して確認したのは 2.50.1 だけ。版の判定と、古い版で partial clone を拒否する経路は、版を差し替えたテストで確認した。Linux のディストリビューション同梱 Git での実行は未確認で、P1-00 の CI で `ubuntu:24.04` コンテナ（同梱 2.43。partial clone は Unavailable になる想定）を使って確認する。
+- 実行して確認したのは 2.50.1 だけ。版の判定と、古い版で partial clone を拒否する経路は、版を差し替えたテストで確認した。CI の `ubuntu:24.04` コンテナ（同梱 Git 2.43.0）でも全テストが通った。2.45 未満なので partial clone は Unavailable の経路になる。
 - 契約の各要素を外すと対応するテストが失敗することを確認した（fsmonitor・index・filter・lazy fetch）。
 
 ### 3.4 P0-03 AST・リンク・TOC・検索・履歴
@@ -128,16 +128,18 @@ fixture は `testdata/markdown/gfm.md`。
 
 ### 3.5 P0-09 非同期と上限
 
-**計測**（macOS / APFS。Linux は P1-00 の CI で計測する。WSL の `/mnt/c` は検証環境がなく未計測）
+**計測**（macOS / APFS と、GitHub Actions の Ubuntu ランナー上の `ubuntu:24.04` コンテナ。WSL の `/mnt/c` は検証環境がなく未計測）
 
-| 対象 | 結果 |
-|---|---|
-| パス列挙（`os.Root` 経由の WalkDir） | 1万件 163ms、10万件 1.58s、30万件 5.23s、最初の 512 件は約 10ms。ヒープ増分は 30万件で約 29MiB |
-| Markdown 解析と描画（幅 100） | 100KiB 80ms、1MiB 596ms、4MiB 2.37s。描画結果は元文書の約 9 倍（1MiB → 9.4MiB） |
-| Git status（2万ファイル、契約込み） | Open（rev-parse と config）を含めて約 100ms |
-| Mermaid | SVG 0.1〜0.3ms、PNG（scale 2）40〜60ms |
+| 対象 | macOS | Linux（CI ランナー） |
+|---|---|---|
+| パス列挙（`os.Root` 経由の WalkDir） | 1万件 163ms、10万件 1.58s、30万件 5.23s。最初の 512 件は約 10ms。ヒープ増分は 30万件で約 29MiB | 1万件 61ms、10万件 566ms、30万件 1.57s。最初の 512 件は約 4ms。ヒープ増分は約 22MiB |
+| Markdown 解析と描画（幅 100） | 100KiB 80ms、1MiB 596ms、4MiB 2.37s。描画結果は元文書の約 9 倍（1MiB → 9.4MiB） | 100KiB 250ms、1MiB 2.44s、4MiB 6.66s |
+| Git status（2万ファイル、契約込み） | Open（rev-parse と config）を含めて約 100ms | 約 65ms |
+| Mermaid | SVG 0.1〜0.3ms、PNG（scale 2）40〜60ms | SVG 0.1〜0.2ms、PNG 105〜173ms |
 
-**P1 の初期値**（Linux CI の計測後に必要なら見直す）
+- Linux ランナーでは描画が約 4 倍遅く、Preview の上限（1MiB）で 2.4 秒かかる。描画は非同期なので操作は止まらないため、上限は据え置く。待ち時間の短縮は P1-04 で扱う（画面に見えている範囲のブロックから先に描画する）。
+
+**P1 の初期値**
 
 | 上限 | 値 | 根拠 |
 |---|---|---|
