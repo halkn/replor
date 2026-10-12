@@ -2,6 +2,8 @@ module github.com/halkn/replor
 
 go 1.26.0
 
+toolchain go1.27.1
+
 require (
 	charm.land/bubbletea/v2 v2.1.0
 	charm.land/glamour/v2 v2.0.1

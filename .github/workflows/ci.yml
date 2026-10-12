@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - run: make ci
+
+  # Distribution git (older than the runner's) and a static Linux binary on a
+  # stock Ubuntu userland. See ROADMAP P1-00.
+  linux-distro:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    env:
+      TERM: xterm-256color
+    steps:
+      - run: apt-get update && apt-get install -y --no-install-recommends git make ca-certificates bsdutils
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      # The checkout is owned by another uid than the container's root; go
+      # build stamps VCS info and would be refused.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: git --version
+      - run: make test build
+      - name: smoke-run static binaries
+        run: |
+          CGO_ENABLED=0 go build -o replor-spike ./spike/tui
+          CGO_ENABLED=0 go build -o mermaid-spike ./spike/mermaid
+          ./mermaid-spike -out "$RUNNER_TEMP/mermaid"
+          (sleep 2; printf q; sleep 3) | timeout 20 script -qec "./replor-spike -images off testdata/markdown/gfm.md" /dev/null
+      - run: make load
