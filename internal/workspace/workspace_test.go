@@ -4,7 +4,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func mkfile(t *testing.T, p, s string) {
@@ -120,5 +123,85 @@ func TestReadFileLimit(t *testing.T) {
 	}
 	if _, err := w.ReadFile("docs", 1<<20); err == nil {
 		t.Error("directory read as file")
+	}
+}
+
+func TestListDir(t *testing.T) {
+	_, ws := layout(t)
+	mkfile(t, filepath.Join(ws, ".git", "HEAD"), "")
+	mkfile(t, filepath.Join(ws, "b.txt"), "")
+	w, err := Open(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+
+	nodes, truncated, err := w.ListDir(".", 0)
+	if err != nil || truncated {
+		t.Fatal(err, truncated)
+	}
+	got := map[string]Node{}
+	var order []string
+	for _, n := range nodes {
+		got[n.Name] = n
+		order = append(order, n.Name)
+	}
+	if want := "docs,README.md,abs-in.md,b.txt,in.md,outdir,up.md"; strings.Join(order, ",") != want {
+		t.Errorf("order = %v, want %s", order, want)
+	}
+	check := func(name string, kind NodeKind, link bool) {
+		t.Helper()
+		n := got[name]
+		if n.Kind != kind || n.Symlink != link {
+			t.Errorf("%s = %+v, want kind %v symlink %v", name, n, kind, link)
+		}
+	}
+	check("docs", NodeDir, false)
+	check("in.md", NodeFile, true)
+	check("up.md", NodeBroken, true)
+	check("abs-in.md", NodeBroken, true)
+	check("outdir", NodeBroken, true)
+	if got["up.md"].Reason == "" || got["docs"].Rel != "docs" {
+		t.Errorf("reason/rel: %+v %+v", got["up.md"], got["docs"])
+	}
+
+	sub, _, err := w.ListDir("docs", 0)
+	if err != nil || len(sub) != 2 || sub[0].Name != "back" || sub[0].Kind != NodeDir || !sub[0].Symlink || sub[1].Rel != "docs/a.md" {
+		t.Errorf("docs = %+v %v", sub, err)
+	}
+
+	limited, truncated, err := w.ListDir(".", 2)
+	if err != nil || !truncated || len(limited) != 2 {
+		t.Errorf("limit: %d %v %v", len(limited), truncated, err)
+	}
+	if _, _, err := w.ListDir("../", 0); !errors.Is(err, ErrOutside) {
+		t.Errorf("escape: %v", err)
+	}
+}
+
+// Opening a FIFO for reading blocks until a writer appears; it must be
+// refused before open.
+func TestReadFileRefusesFIFO(t *testing.T) {
+	dir, _ := filepath.EvalSymlinks(t.TempDir())
+	if err := syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o644); err != nil {
+		t.Skip("mkfifo:", err)
+	}
+	w, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	done := make(chan error, 1)
+	go func() {
+		_, err := w.ReadFile("pipe", 1<<20)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("FIFO was read")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReadFile blocked on a FIFO")
 	}
 }

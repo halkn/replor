@@ -1,3 +1,5 @@
-# Binaries built by the manual steps in docs/adr/0001-p0-technical-spike.md
+# Binaries built with `go build ./cmd/replor` and by the manual steps in
+# docs/adr/0001-p0-technical-spike.md
+/replor
 /replor-spike
 /mermaid-spike

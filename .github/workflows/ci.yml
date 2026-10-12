@@ -48,8 +48,9 @@ jobs:
       - run: make test build
       - name: smoke-run static binaries
         run: |
-          CGO_ENABLED=0 go build -o replor-spike ./spike/tui
+          CGO_ENABLED=0 go build -o replor ./cmd/replor
           CGO_ENABLED=0 go build -o mermaid-spike ./spike/mermaid
+          ./replor -version
           ./mermaid-spike -out "$RUNNER_TEMP/mermaid"
-          (sleep 2; printf q; sleep 3) | timeout 20 script -qec "./replor-spike -images off testdata/markdown/gfm.md" /dev/null
+          (sleep 2; printf q; sleep 3) | timeout 20 script -qec "./replor -images off testdata/markdown/gfm.md" /dev/null
       - run: make load
