@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/halkn/replor/internal/process"
@@ -138,16 +137,13 @@ type Repo struct {
 	Toplevel string
 	// Prefix is the workspace directory relative to Toplevel ("" or "sub/dir/").
 	Prefix string
-
-	mu          sync.Mutex
-	filterNames []string
 }
 
 // Open resolves the repository containing dir. A directory outside any
 // repository yields ErrNotRepository.
 func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
 	r := &Repo{git: g, dir: dir}
-	out, err := r.run(ctx, nil, "rev-parse", "--is-inside-work-tree", "--show-toplevel", "--show-prefix")
+	out, err := r.run(ctx, nil, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
 		var pe *process.Error
 		if errors.As(err, &pe) {
@@ -160,13 +156,16 @@ func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
 		}
 		return nil, err
 	}
-	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
-	if len(lines) < 2 || lines[0] != "true" {
+	if strings.TrimSpace(string(out)) != "true" {
 		return nil, ErrNotRepository
 	}
-	r.Toplevel = lines[1]
-	if len(lines) > 2 {
-		r.Prefix = lines[2]
+	// One value per call: rev-parse separates values with newlines, which
+	// may also occur inside the paths themselves.
+	if r.Toplevel, err = r.revParsePath(ctx, "--show-toplevel"); err != nil {
+		return nil, err
+	}
+	if r.Prefix, err = r.revParsePath(ctx, "--show-prefix"); err != nil {
+		return nil, err
 	}
 	if g.Version.Less(LazyFetchVersion) {
 		partial, err := r.isPartialClone(ctx)
@@ -178,6 +177,14 @@ func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
 		}
 	}
 	return r, nil
+}
+
+func (r *Repo) revParsePath(ctx context.Context, flag string) (string, error) {
+	out, err := r.run(ctx, nil, "rev-parse", flag)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(string(out), "\n"), nil
 }
 
 // ErrNotRepository means the workspace is not inside a git work tree.
@@ -196,13 +203,9 @@ func (r *Repo) Run(ctx context.Context, args ...string) ([]byte, error) {
 // filters lists configured filter driver names. Attributes from the work tree,
 // info/attributes or core.attributesFile can select any of them, and status
 // and diff then run the driver's clean command, so every configured driver is
-// overridden rather than relying on which attribute files are read.
+// overridden rather than relying on which attribute files are read. The list
+// is read again for every command because config can change at any time.
 func (r *Repo) filters(ctx context.Context) ([]string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.filterNames != nil {
-		return r.filterNames, nil
-	}
 	out, err := r.run(ctx, nil, "config", "-z", "--name-only", "--get-regexp", `^filter\.`)
 	if err != nil {
 		var pe *process.Error
@@ -229,7 +232,6 @@ func (r *Repo) filters(ctx context.Context) ([]string, error) {
 			names = append(names, name)
 		}
 	}
-	r.filterNames = names
 	return names, nil
 }
 

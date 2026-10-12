@@ -393,3 +393,63 @@ func TestLoadStatus(t *testing.T) {
 		t.Logf("run %d: files=20000 open+status=%v bytes=%d", i, time.Since(start).Round(time.Millisecond), len(out))
 	}
 }
+
+// A filter driver configured after Open must still be neutralized.
+func TestFilterAddedAfterOpenIsNeutralized(t *testing.T) {
+	hermetic(t)
+	repo := newRepo(t)
+	bin, markers := t.TempDir(), t.TempDir()
+	write(t, filepath.Join(repo, "a.txt"), "base\n")
+	write(t, filepath.Join(repo, ".gitattributes"), "*.txt filter=late\n")
+	sh(t, repo, "add", ".")
+	sh(t, repo, "commit", "-qm", "init")
+
+	g := detect(t)
+	ctx := context.Background()
+	r, err := g.Open(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Run(ctx, "status", "--porcelain=v2", "-z"); err != nil {
+		t.Fatal(err)
+	}
+
+	sh(t, repo, "config", "filter.late.clean", markerScript(t, bin, markers, "late"))
+	time.Sleep(1100 * time.Millisecond)
+	write(t, filepath.Join(repo, "a.txt"), "bas2\n")
+	for _, args := range [][]string{
+		{"status", "--porcelain=v2", "-z"},
+		{"diff", "--no-ext-diff", "--no-textconv"},
+	} {
+		if _, err := r.Run(ctx, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if entries, _ := os.ReadDir(markers); len(entries) > 0 {
+		t.Error("filter configured after Open was executed")
+	}
+}
+
+func TestOpenPathsWithNewlines(t *testing.T) {
+	hermetic(t)
+	root := filepath.Join(t.TempDir(), "re\npo")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, root, "init", "-q")
+	sub := filepath.Join(root, "d\nx")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := detect(t).Open(context.Background(), sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(root)
+	if r.Toplevel != want || r.Prefix != "d\nx/" {
+		t.Errorf("toplevel=%q prefix=%q", r.Toplevel, r.Prefix)
+	}
+	if rel, ok := r.FromGit("d\nx/f.md"); !ok || rel != "f.md" {
+		t.Errorf("FromGit = %q, %v", rel, ok)
+	}
+}
