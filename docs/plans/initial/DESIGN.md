@@ -109,11 +109,11 @@ gh-miniの「ディレクトリを開いて、ファイル・README・Git差分�
 | `/` | 表示中の文書内検索 |
 | `n/N` | 文書内検索の次／前の一致へ移動 |
 | `t` | 見出し一覧（TOC） |
-| `d` | ファイルのDiff、またはChangesへ移動 |
+| `d` | 表示中ファイルの Diff を unstaged → staged の順に表示し、最後に Preview へ戻る（変更のないファイルでは無効） |
 | `s` | PreviewとSourceの切替（Markdownのみ。閲覧位置はソース行で引き継ぐ） |
 | `e` | ファイルツリーの表示／非表示 |
 | `i` | Gitが無視する未追跡ファイルの表示／非表示（ツリーとファインダー共通。既定は非表示） |
-| `c` | Files と Changes の切替（P1-07） |
+| `c` | 左ペインの Files と Changes の切替。Changes は Conflicts / Staged / Unstaged / Untracked に分けて並べ、`Enter` で Diff を開く |
 | `b` | Changes 内の Working と Branch の切替（P1-08） |
 | `Backspace` | 履歴を戻る |
 | `]` | 履歴を進む |
@@ -489,6 +489,7 @@ replor --no-watch
 | D-10 | Git 実行契約（7.3）と最低 Git 2.31 | 素の status/diff が hook・filter・external diff を実行し index を書き換えることを実測（ADR-0001） |
 | D-11 | 画像は Kitty placeholder / halfblocks / off、Sixel は対象外 | セル単位の差分描画の中で扱えるのは placeholder とテキストだけ（ADR-0001） |
 | D-12 | Mermaid は go-mermaid＋raster の内製版（CJK フォールバック） | upstream の PNG 化は日本語非対応（ADR-0001） |
+| D-13 | Diff は内製の unified ビューア（`git diff` の出力を無害化して色分け）。untracked は Workspace 境界内でファイルを読んで追加として組み立てる | 外部ツール（delta 等）への委譲は外部実行を抑止する Git 実行契約（7.3）と相容れない |
 
 ## 14. 未決定事項と検証条件
 
@@ -499,7 +500,6 @@ P0 で決定した事項は ADR-0001 に記録した。残りは次のとおり�
 | Windows Terminal + WSL | 表示（halfblocks・絵文字幅）と `/mnt/c` 上の性能。ベストエフォートのため v1 の完了条件に含めない。Windows 環境を確保できたときに確認する | P3-02（任意） |
 | Mermaid の日本語 | raster 内製版＋OS フォント探索で 3 図種の日本語が読める。CJK フォントがない Linux での表示を決める | P2-04 |
 | Wiki内部リンクの互換範囲 | Azure のファイル名変換とリンクの対応を合成 fixture で確定 | P2-03 |
-| 変更差分表示 | 内製unified viewerか外部ツール委譲か | Phase 1 |
 | remote情報の統合 | v1利用から実需が確認できた場合のみ着手 | v1後 |
 
 ## 15. 参照資料

@@ -32,7 +32,11 @@ func (m *Model) View() tea.View {
 	viewer := m.viewerLines(h)
 	var side []string
 	if m.sideVisible() {
-		side = m.treeLines(h)
+		if m.left == leftChanges {
+			side = m.changesLines(h)
+		} else {
+			side = m.treeLines(h)
+		}
 	}
 	sep := "│"
 	if m.focus == paneViewer {
@@ -80,21 +84,36 @@ func (m *Model) header() string {
 	parts = append(parts, m.headerGit()...)
 	v := &m.viewer
 	if v.target != nil {
-		parts = append(parts, bar.Render("  "+clean(v.target.Path)))
-		if v.res.Kind == preview.KindMarkdown || v.target.Mode == ModeSource {
-			pv, src := bar.Render(" Preview "), bar.Render(" Source ")
-			if v.target.Mode == ModeSource {
-				src = tabOn.Render(" Source ")
-			} else {
-				pv = tabOn.Render(" Preview ")
-			}
-			parts = append(parts, bar.Render("  "), pv, src)
-		}
+		parts = append(parts, bar.Render("  "+clean(v.target.Path)), bar.Render(" "))
+		parts = append(parts, m.tabs()...)
 	}
 	if v.pending {
 		parts = append(parts, bar.Render("  ⟳"))
 	}
 	return m.barLine(parts...)
+}
+
+// tabs lists the views offered for the current file (DESIGN 4.1: only the
+// ones it supports), highlighting the active one.
+func (m *Model) tabs() []string {
+	t := *m.viewer.target
+	tab := func(label string, on bool) string {
+		if on {
+			return tabOn.Render(" " + label + " ")
+		}
+		return bar.Render(" " + label + " ")
+	}
+	var out []string
+	if preview.IsMarkdown(t.Path) {
+		out = append(out, tab("Preview", t.Mode == ModePreview), tab("Source", t.Mode == ModeSource))
+	}
+	scopes, _ := scopesFor(m.git.snap, t.Path)
+	if t.Mode == ModeDiff {
+		out = append(out, tab("Diff "+t.Scope.String(), true))
+	} else if len(scopes) > 0 {
+		out = append(out, tab("Diff", false))
+	}
+	return out
 }
 
 func (m *Model) footer() string {
@@ -116,6 +135,80 @@ func (m *Model) footer() string {
 		s = " Tab focus · Enter open · / search · t TOC · > link · ⌫ back · ? help · q quit"
 	}
 	return m.line(s)
+}
+
+func (m *Model) changesLines(h int) []string {
+	w := m.sideWidth()
+	c := &m.changes
+	if len(c.entries) == 0 {
+		out := []string{dim.Render(fit("No changes", w))}
+		for len(out) < h {
+			out = append(out, strings.Repeat(" ", w))
+		}
+		return out
+	}
+	// Section headings take a row each; keep the cursor in view.
+	type row struct {
+		text  string
+		entry int
+	}
+	var rows []row
+	section := ""
+	for i, e := range c.entries {
+		if e.section != section {
+			section = e.section
+			rows = append(rows, row{accent.Render(fit(section, w)), -1})
+		}
+		rows = append(rows, row{"", i})
+	}
+	cur := 0
+	for i, r := range rows {
+		if r.entry == c.cursor {
+			cur = i
+		}
+	}
+	if cur < c.top {
+		c.top = cur
+	}
+	if cur >= c.top+h {
+		c.top = cur - h + 1
+	}
+	out := make([]string, 0, h)
+	for i := c.top; i < len(rows) && len(out) < h; i++ {
+		r := rows[i]
+		if r.entry < 0 {
+			out = append(out, r.text)
+			continue
+		}
+		e := c.entries[r.entry]
+		label := clean(e.path())
+		switch {
+		case e.change.OrigPath != "" && e.change.Path != "":
+			label = clean(e.change.OrigPath) + " → " + label
+		case e.change.RepoOrigPath != "" && e.change.OrigPath == "":
+			label = "(outside) → " + label
+		case e.change.Path == "":
+			label += " → (outside)"
+		}
+		mk := mark(e.change)
+		if e.section == sectionStaged {
+			mk = e.change.Index
+		} else if e.section == sectionUnstaged {
+			mk = e.change.Worktree
+		}
+		text := fit("  "+label, w-2)
+		switch {
+		case r.entry == c.cursor && m.focus == paneFiles:
+			text = selected.Render(text)
+		case r.entry == c.cursor:
+			text = dim.Render(text)
+		}
+		out = append(out, text+" "+styledMark(mk))
+	}
+	for len(out) < h {
+		out = append(out, strings.Repeat(" ", w))
+	}
+	return out
 }
 
 func (m *Model) treeLines(h int) []string {

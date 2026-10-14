@@ -96,6 +96,7 @@ func (m *Model) applyGit(msg gitMsg) tea.Cmd {
 		// the tree with build output on a transient failure.
 		gs.phase, gs.reason, gs.snap = gitFailed, msg.err.Error(), nil
 		gs.marks, gs.dirty, gs.counts = nil, nil, nil
+		m.rebuildChanges()
 		return nil
 	}
 	oldIgnored := gs.ignored
@@ -123,12 +124,19 @@ func (m *Model) applyGit(msg gitMsg) tea.Cmd {
 			gs.ignored[nfc(p)] = true
 		}
 	}
-	// The tree and the finder filter with the ignored set; redo them when
-	// it changes (always on the first snapshot).
-	if !m.showIgnored && !sameSet(oldIgnored, gs.ignored) {
-		return tea.Batch(m.refreshTree(), m.invalidateFinder())
+	m.rebuildChanges()
+	var cmds []tea.Cmd
+	// A shown diff belongs to the previous snapshot.
+	if t := m.viewer.target; t != nil && t.Mode == ModeDiff {
+		m.viewer.savePos()
+		cmds = append(cmds, m.load())
 	}
-	return nil
+	// The tree and the finder filter with the ignored set; redo them when
+	// it changes.
+	if !m.showIgnored && !sameSet(oldIgnored, gs.ignored) {
+		cmds = append(cmds, m.refreshTree(), m.invalidateFinder())
+	}
+	return tea.Batch(cmds...)
 }
 
 // mark is the letter shown next to a changed file: the work tree state when

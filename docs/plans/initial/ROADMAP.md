@@ -91,7 +91,8 @@
 | P1-04 | 完了 |
 | P1-05 | 完了 |
 | P1-06 | 完了。ツリーの状態マーク・変更を含むディレクトリの印・ヘッダーのブランチと件数・Git なし/使用不可の表示 |
-| P1-07〜P1-10 | 未着手 |
+| P1-07 | 完了。Changes ペイン（`c`）、Diff（`d`）、同一パスの staged / unstaged、初回コミット前、削除、rename（境界をまたぐ場合を含む）、conflict（作業ファイルを表示）、submodule、一覧と diff の revision 照合 |
+| P1-08〜P1-10 | 未着手 |
 
 **P1完了条件（MVP Definition of Done）**
 

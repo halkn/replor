@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/halkn/replor/internal/git"
 	"github.com/halkn/replor/internal/preview"
 	"github.com/halkn/replor/internal/workspace"
 )
@@ -15,12 +16,14 @@ type Mode int
 const (
 	ModePreview Mode = iota // rendered Markdown, image, or source for other text
 	ModeSource              // Markdown as source
+	ModeDiff                // a git diff of the file (Scope)
 )
 
 // Target is what the viewer shows. It keys history entries and async loads.
 type Target struct {
-	Path string
-	Mode Mode
+	Path  string
+	Mode  Mode
+	Scope git.Scope // ModeDiff only
 }
 
 // HistoryEntry is one back/forward step.
@@ -64,10 +67,12 @@ type Model struct {
 	focus         pane
 	hideSide      bool
 
-	tree   tree
-	viewer viewer
-	finder finder
-	git    gitState
+	tree    tree
+	viewer  viewer
+	finder  finder
+	git     gitState
+	left    leftMode
+	changes changesState
 	// showIgnored also lists untracked files that git ignores.
 	showIgnored bool
 
