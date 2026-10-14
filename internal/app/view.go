@@ -92,6 +92,8 @@ func (m *Model) footer() string {
 	switch {
 	case m.overlay == overlaySearch:
 		s = " /" + clean(m.input) + "▏"
+	case m.overlay == overlayFinder:
+		s = " Enter open · ↑/↓ choose · Esc close"
 	case m.status != "":
 		s = " " + clean(m.status)
 	case v.linkIdx >= 0 && v.doc() != nil:
@@ -184,6 +186,8 @@ func (m *Model) viewerLines(h int) []string {
 	v := &m.viewer
 	var out []string
 	switch {
+	case m.overlay == overlayFinder:
+		out = m.finderLines(w, h)
 	case m.overlay == overlayHelp:
 		out = m.helpLines(w)
 	case m.overlay == overlayTOC && v.doc() != nil:
@@ -247,6 +251,50 @@ func (m *Model) tocLines(w, h int) []string {
 		out = append(out, l)
 	}
 	return out
+}
+
+func (m *Model) finderLines(w, h int) []string {
+	f := &m.finder
+	out := []string{accent.Render("Find: ") + clean(f.query) + "▏"}
+	status := fmt.Sprintf("%d of %d files", len(f.results), len(f.paths))
+	switch {
+	case f.err != "":
+		status += " · " + warn.Render("error: "+clean(f.err))
+	case f.enumerating:
+		status += " · scanning…"
+	case f.reason != "":
+		status += " · partial: " + f.reason
+	}
+	out = append(out, dim.Render(status))
+	rows := h - len(out)
+	start := max(0, f.cursor-rows+1)
+	for i := start; i < len(f.results) && len(out) < h; i++ {
+		r := f.results[i]
+		line := fit(highlight(f.paths[r.Index], r.Positions), w)
+		if i == f.cursor {
+			line = selected.Render(ansi.Strip(line))
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// highlight marks the matched runes of a path; each rune is sanitized on
+// its own because positions refer to the raw bytes.
+func highlight(p string, positions []int) string {
+	hit := make(map[int]bool, len(positions))
+	for _, i := range positions {
+		hit[i] = true
+	}
+	var b strings.Builder
+	for i, r := range p {
+		if hit[i] {
+			b.WriteString(accent.Render(clean(string(r))))
+		} else {
+			b.WriteString(clean(string(r)))
+		}
+	}
+	return b.String()
 }
 
 func (m *Model) helpLines(w int) []string {

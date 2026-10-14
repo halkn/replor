@@ -401,5 +401,5 @@ func (m *Model) followLink() tea.Cmd {
 
 func (m *Model) reload() tea.Cmd {
 	m.viewer.savePos()
-	return tea.Batch(m.refreshTree(), m.load())
+	return tea.Batch(m.refreshTree(), m.load(), m.invalidateFinder())
 }
