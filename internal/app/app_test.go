@@ -151,12 +151,12 @@ func TestStartupOpensReadmeAndListsTree(t *testing.T) {
 	}
 
 	// Expand docs asynchronously and open guide.md.
-	m.tree.cursor = m.tree.indexOf("docs")
+	m.tree.setCursor(m.tree.indexOf("docs"))
 	drive(t, m, key("l"))
 	if i := m.tree.indexOf("docs/guide.md"); i < 0 {
 		t.Fatal("docs not expanded")
 	} else {
-		m.tree.cursor = i
+		m.tree.setCursor(i)
 	}
 	drive(t, m, key("enter"))
 	if m.viewer.target.Path != "docs/guide.md" || !onScreen(m, "Guide") {

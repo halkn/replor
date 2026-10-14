@@ -7,11 +7,14 @@ import (
 	"strings"
 	"testing"
 
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"golang.org/x/text/unicode/norm"
+
+	"github.com/halkn/replor/internal/preview"
 )
 
-// hermeticGit isolates git from the developer's configuration (see
-// docs/development.md).
+// hermeticGit is isolateGit for tests that need git installed.
 func hermeticGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -21,7 +24,10 @@ func hermeticGit(t *testing.T) {
 }
 
 // isolateGit is applied to every UI test, since the model runs git on
-// start-up.
+// start-up. It covers the developer's global config: replor passes HOME and
+// XDG_CONFIG_HOME to git. The system config still applies to replor's own
+// git calls, because the process allowlist drops GIT_CONFIG_NOSYSTEM; those
+// variables only isolate the fixture setup done with gitIn.
 func isolateGit(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
@@ -169,3 +175,122 @@ func TestGitSubdirectoryWorkspace(t *testing.T) {
 }
 
 func plain(s string) string { return ansi.Strip(s) }
+
+// The cursor follows its file when the ignored filter changes which rows
+// exist: on the first git result and when `i` is pressed.
+func TestCursorKeptByPathWhenRowsChange(t *testing.T) {
+	dir := gitWorkspace(t)
+	m := start(t, dir, 100, 20)
+	if got := m.tree.rows[m.tree.cursor].node.Rel; got != "README.md" {
+		t.Fatalf("cursor on %q after the git result, want README.md", got)
+	}
+	m.tree.setCursor(m.tree.indexOf("src"))
+	drive(t, m, key("i"))
+	if got := m.tree.rows[m.tree.cursor].node.Rel; got != "src" {
+		t.Errorf("cursor on %q after i, want src", got)
+	}
+	// Expanding a directory above the cursor shifts rows below it.
+	m.tree.setCursor(m.tree.indexOf("src"))
+	m.tree.setCursor(m.tree.indexOf("docs"))
+	drive(t, m, key("l"))
+	m.tree.setCursor(m.tree.indexOf("src"))
+	drive(t, m, key("i"))
+	if got := m.tree.rows[m.tree.cursor].node.Rel; got != "src" {
+		t.Errorf("cursor on %q after re-listing with docs expanded, want src", got)
+	}
+}
+
+// macOS file systems may hand back decomposed (NFD) names while git prints
+// them composed (NFC).
+func TestDecomposedFileNamesMatchGitOutput(t *testing.T) {
+	dir := gitWorkspace(t)
+	nfd := "ガ.md"      // ガ decomposed
+	ignored := "ギ.log" // ギ decomposed, matches *.log
+	for _, n := range []string{nfd, ignored} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitIn(t, dir, "add", nfd)
+	gitIn(t, dir, "commit", "-qm", "nfd")
+	if err := os.WriteFile(filepath.Join(dir, nfd), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := start(t, dir, 100, 30)
+	var row, ignoredRow string
+	for i, r := range m.tree.rows {
+		switch norm.NFC.String(r.node.Name) {
+		case "ガ.md":
+			row = stripANSI(m.treeRow(i, m.sideWidth()))
+		case "ギ.log":
+			ignoredRow = r.node.Name
+		}
+	}
+	if !strings.HasSuffix(row, "M") {
+		t.Errorf("modified NFD file row %q", row)
+	}
+	if ignoredRow != "" {
+		t.Errorf("ignored NFD file shown: %q", ignoredRow)
+	}
+}
+
+// Every cell of the header carries the bar background, including the text
+// after a coloured status letter.
+func TestHeaderKeepsBarBackground(t *testing.T) {
+	m := start(t, gitWorkspace(t), 100, 10)
+	buf := uv.NewScreenBuffer(m.width, 1)
+	uv.NewStyledString(screen(t, m)[0]).Draw(buf, uv.Rect(0, 0, m.width, 1))
+	for x := range m.width {
+		if c := buf.CellAt(x, 0); c == nil || c.Style.Bg == nil {
+			t.Fatalf("header cell %d (%q) has no background", x, c.Content)
+		}
+	}
+}
+
+func TestGitFailureClearsMarks(t *testing.T) {
+	dir := gitWorkspace(t)
+	m := start(t, dir, 100, 20)
+	if len(m.git.marks) == 0 {
+		t.Fatal("precondition: marks")
+	}
+	if err := os.RemoveAll(filepath.Join(dir, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	drive(t, m, key("r"))
+	if m.git.phase != gitFailed || len(m.git.marks) != 0 || len(m.git.dirty) != 0 {
+		t.Errorf("phase %v marks %v dirty %v", m.git.phase, m.git.marks, m.git.dirty)
+	}
+	if strings.Contains(plain(screen(t, m)[0]), "M:") {
+		t.Error("header still counts changes")
+	}
+}
+
+func TestRenameMarksSourceDirectory(t *testing.T) {
+	dir := gitWorkspace(t)
+	gitIn(t, dir, "mv", "src/main.go", "main.go")
+	m := start(t, dir, 100, 20)
+	if !m.git.dirty["src"] {
+		t.Errorf("src not marked after a file was renamed out of it: %v", m.git.dirty)
+	}
+}
+
+// DESIGN 6.2: a file being viewed stays in the tree, marked, even when
+// ignored files are hidden.
+func TestViewedIgnoredFileStaysInTree(t *testing.T) {
+	m := start(t, gitWorkspace(t), 100, 20)
+	drive(t, m, key("i"))
+	run(t, m, m.open(Target{Path: "debug.log"}, preview.Position{}, nil, true))
+	drive(t, m, key("i"))
+	if got := rowText(t, m, "debug.log"); !strings.HasSuffix(got, "!") {
+		t.Errorf("viewed ignored file row %q", got)
+	}
+	if m.tree.indexOf("build") >= 0 {
+		t.Error("other ignored entries must stay hidden")
+	}
+}
+
+func TestSameSetTreatsMissingAsEmpty(t *testing.T) {
+	if !sameSet(nil, map[string]bool{}) || sameSet(nil, map[string]bool{"a": true}) {
+		t.Error("sameSet: nil must equal the empty set")
+	}
+}

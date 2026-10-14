@@ -19,7 +19,8 @@ var (
 	dim      = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
 	warn     = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	selected = lipgloss.NewStyle().Reverse(true)
-	bar      = lipgloss.NewStyle().Background(lipgloss.Color("236")).Foreground(lipgloss.Color("252"))
+	barBG    = lipgloss.Color("236")
+	bar      = lipgloss.NewStyle().Background(barBG).Foreground(lipgloss.Color("252"))
 	tabOn    = lipgloss.NewStyle().Background(lipgloss.Color("63")).Foreground(lipgloss.Color("230"))
 )
 
@@ -64,26 +65,36 @@ func (m *Model) line(s string) string {
 // clean makes untrusted text safe to draw (document.Sanitize).
 func clean(s string) string { return document.Sanitize(s) }
 
+// onBar gives a style the bar background. Every styled part ends with a
+// full reset, so each part of a bar line carries the background itself.
+func onBar(st lipgloss.Style) lipgloss.Style { return st.Background(barBG) }
+
+// barLine joins parts styled on the bar and pads them to the width.
+func (m *Model) barLine(parts ...string) string {
+	s := ansi.Truncate(strings.Join(parts, ""), m.width, bar.Render("…"))
+	return s + bar.Render(strings.Repeat(" ", max(0, m.width-ansi.StringWidth(s))))
+}
+
 func (m *Model) header() string {
-	var b strings.Builder
-	b.WriteString(" " + clean(path.Base(m.ws.Root)) + "  " + m.headerGit())
+	parts := []string{bar.Render(" " + clean(path.Base(m.ws.Root)) + "  ")}
+	parts = append(parts, m.headerGit()...)
 	v := &m.viewer
 	if v.target != nil {
-		b.WriteString("  " + clean(v.target.Path))
+		parts = append(parts, bar.Render("  "+clean(v.target.Path)))
 		if v.res.Kind == preview.KindMarkdown || v.target.Mode == ModeSource {
-			pv, src := " Preview ", " Source "
+			pv, src := bar.Render(" Preview "), bar.Render(" Source ")
 			if v.target.Mode == ModeSource {
-				src = tabOn.Render(src)
+				src = tabOn.Render(" Source ")
 			} else {
-				pv = tabOn.Render(pv)
+				pv = tabOn.Render(" Preview ")
 			}
-			b.WriteString("  " + pv + src)
+			parts = append(parts, bar.Render("  "), pv, src)
 		}
 	}
 	if v.pending {
-		b.WriteString("  ⟳")
+		parts = append(parts, bar.Render("  ⟳"))
 	}
-	return m.line(b.String())
+	return m.barLine(parts...)
 }
 
 func (m *Model) footer() string {
@@ -169,9 +180,9 @@ func (m *Model) treeRow(i, w int) string {
 	switch {
 	case m.git.isIgnored(r.node.Rel):
 		gitMark = dim.Render("!")
-	case m.git.marks[r.node.Rel] != 0:
-		gitMark = styledMark(m.git.marks[r.node.Rel])
-	case m.git.dirty[r.node.Rel]:
+	case m.git.markOf(r.node.Rel) != 0:
+		gitMark = styledMark(m.git.markOf(r.node.Rel))
+	case m.git.isDirty(r.node.Rel):
 		gitMark = markStyles['M'].Render("•")
 	}
 	text := fit(strings.Repeat("  ", r.depth)+icon+name+suffix, w-2)

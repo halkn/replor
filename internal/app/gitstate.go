@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/halkn/replor/internal/git"
 )
@@ -29,10 +30,19 @@ type gitState struct {
 	repo   *git.Repo
 	snap   *git.Snapshot
 
+	// The maps are keyed by NFC paths: macOS can return decomposed names
+	// from the file system while git prints composed ones.
 	marks   map[string]byte // workspace path -> status mark
 	dirty   map[string]bool // directories containing changes
 	ignored map[string]bool // untracked ignored entries; directories end with "/"
+	counts  map[byte]int    // changes per mark, for the header
 }
+
+func nfc(s string) string { return norm.NFC.String(s) }
+
+func (gs *gitState) markOf(rel string) byte { return gs.marks[nfc(rel)] }
+
+func (gs *gitState) isDirty(rel string) bool { return gs.dirty[nfc(rel)] }
 
 type gitMsg struct {
 	ticket Ticket
@@ -81,23 +91,37 @@ func (m *Model) applyGit(msg gitMsg) tea.Cmd {
 		*gs = gitState{phase: gitUnavailable, reason: msg.err.Error()}
 		return nil
 	case msg.err != nil:
-		gs.phase, gs.reason = gitFailed, msg.err.Error()
+		// Marks from an older snapshot would contradict the error. The
+		// ignored set is kept: it only filters, and dropping it would flood
+		// the tree with build output on a transient failure.
+		gs.phase, gs.reason, gs.snap = gitFailed, msg.err.Error(), nil
+		gs.marks, gs.dirty, gs.counts = nil, nil, nil
 		return nil
 	}
 	oldIgnored := gs.ignored
 	gs.phase, gs.reason, gs.snap = gitReady, "", msg.snap
-	gs.marks, gs.dirty, gs.ignored = map[string]byte{}, map[string]bool{}, map[string]bool{}
-	for _, c := range msg.snap.Changes {
-		if c.Path == "" {
-			continue // the inside side of the rename is OrigPath; shown in Changes
-		}
-		gs.marks[c.Path] = mark(c)
-		for d := path.Dir(c.Path); d != "."; d = path.Dir(d) {
+	gs.marks, gs.dirty, gs.counts = map[string]byte{}, map[string]bool{}, map[byte]int{}
+	markDirs := func(p string) {
+		for d := path.Dir(nfc(p)); d != "." && d != "/"; d = path.Dir(d) {
 			gs.dirty[d] = true
 		}
 	}
-	for _, p := range msg.snap.Ignored {
-		gs.ignored[p] = true
+	for _, c := range msg.snap.Changes {
+		gs.counts[mark(c)]++
+		if c.OrigPath != "" {
+			markDirs(c.OrigPath) // a file left this directory
+		}
+		if c.Path == "" {
+			continue // renamed out of the workspace; listed in Changes
+		}
+		gs.marks[nfc(c.Path)] = mark(c)
+		markDirs(c.Path)
+	}
+	if msg.snap.IgnoredErr == nil {
+		gs.ignored = map[string]bool{}
+		for _, p := range msg.snap.Ignored {
+			gs.ignored[nfc(p)] = true
+		}
 	}
 	// The tree and the finder filter with the ignored set; redo them when
 	// it changes (always on the first snapshot).
@@ -133,15 +157,18 @@ var markStyles = map[byte]lipgloss.Style{
 	'U': lipgloss.NewStyle().Foreground(lipgloss.Color("170")).Bold(true),
 }
 
-func styledMark(b byte) string {
+func markStyle(b byte) lipgloss.Style {
 	if st, ok := markStyles[b]; ok {
-		return st.Render(string(b))
+		return st
 	}
-	return string(b)
+	return lipgloss.NewStyle()
 }
 
+func styledMark(b byte) string { return markStyle(b).Render(string(b)) }
+
+// sameSet compares sets; a missing set is empty.
 func sameSet(a, b map[string]bool) bool {
-	if a == nil || len(a) != len(b) {
+	if len(a) != len(b) {
 		return false
 	}
 	for k := range a {
@@ -158,6 +185,7 @@ func (gs *gitState) isIgnored(rel string) bool {
 	if len(gs.ignored) == 0 {
 		return false
 	}
+	rel = nfc(rel)
 	if gs.ignored[rel] || gs.ignored[rel+"/"] {
 		return true
 	}
@@ -169,38 +197,32 @@ func (gs *gitState) isIgnored(rel string) bool {
 	return false
 }
 
-// headerGit summarizes the repository for the header line.
-func (m *Model) headerGit() string {
+// headerGit summarizes the repository as header parts styled on the bar.
+func (m *Model) headerGit() []string {
 	gs := &m.git
 	switch gs.phase {
 	case gitLoading:
-		return dim.Render("git …")
+		return []string{onBar(dim).Render("git …")}
 	case gitNone:
-		return dim.Render("no git")
+		return []string{onBar(dim).Render("no git")}
 	case gitUnavailable, gitFailed:
-		return warn.Render("git: " + clean(strings.TrimPrefix(gs.reason, "git unavailable: ")))
+		return []string{onBar(warn).Render("git: " + clean(strings.TrimPrefix(gs.reason, "git unavailable: ")))}
 	}
 	s := gs.snap
-	var b strings.Builder
+	head := clean(s.Branch)
 	switch {
 	case s.Detached:
-		fmt.Fprintf(&b, "detached %.7s", s.HeadOID)
-	default:
-		b.WriteString(clean(s.Branch))
-		if s.HeadOID == "" {
-			b.WriteString(" (no commits)")
-		}
+		head = fmt.Sprintf("detached %.7s", s.HeadOID)
+	case s.HeadOID == "":
+		head += " (no commits)"
 	}
-	counts := map[byte]int{}
-	for _, c := range s.Changes {
-		counts[mark(c)]++
-	}
+	parts := []string{bar.Render(head)}
 	for _, k := range []byte("MADRCTU?") {
-		if n := counts[k]; n > 0 {
-			fmt.Fprintf(&b, " %s:%d", styledMark(k), n)
+		if n := gs.counts[k]; n > 0 {
+			parts = append(parts, bar.Render(" "), onBar(markStyle(k)).Render(string(k)), bar.Render(fmt.Sprintf(":%d", n)))
 		}
 	}
-	return b.String()
+	return parts
 }
 
 func (m *Model) toggleIgnored() tea.Cmd {
