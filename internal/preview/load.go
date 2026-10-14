@@ -88,7 +88,7 @@ func Load(ctx context.Context, req Request) (Result, error) {
 			res.Transmit, res.KittyIDs = []string{tx}, []uint32{id}
 		}
 		return res, nil
-	case bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0:
+	case isBinary(data):
 		res.Kind = KindBinary
 		return res, nil
 	}
@@ -153,6 +153,9 @@ func IsMarkdown(p string) bool {
 	}
 	return false
 }
+
+// isBinary uses git's heuristic: a NUL byte in the first 8000 bytes.
+func isBinary(data []byte) bool { return bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 }
 
 func isImage(data []byte) bool {
 	return bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) ||

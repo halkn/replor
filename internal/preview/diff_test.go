@@ -54,3 +54,11 @@ func TestUntrackedDiff(t *testing.T) {
 		t.Errorf("no final newline:\n%s", d)
 	}
 }
+
+// A line-ending-only change must stay visible: the removed line ends in CR.
+func TestDiffShowsCarriageReturn(t *testing.T) {
+	r := DiffLines("@@ -1 +1 @@\n-c\r\n+c\n", 80)
+	if !strings.Contains(r.Plain[1], "␍") {
+		t.Errorf("removed line %q, added line %q", r.Plain[1], r.Plain[2])
+	}
+}

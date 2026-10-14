@@ -19,6 +19,9 @@ const (
 // DiffLines colors a unified diff. Every line is its own block so that
 // positions and search work as in source view; lines are not wrapped.
 func DiffLines(diff string, width int) *Rendered {
+	// Sanitize drops a CR before LF; in a diff it can be the only change
+	// (CRLF → LF), so it is made visible first.
+	diff = strings.ReplaceAll(diff, "\r\n", "\u240d\n")
 	text := strings.TrimSuffix(expandTabs(document.Sanitize(diff)), "\n")
 	raw := strings.Split(text, "\n")
 	r := &Rendered{Width: width, Lines: make([]string, len(raw)), Plain: raw, BlockLine: make([]int, len(raw)), Complete: true}
@@ -58,7 +61,7 @@ func UntrackedDiff(path string, data []byte) []byte {
 	switch {
 	case len(data) == 0:
 		return b.Bytes()
-	case bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0:
+	case isBinary(data):
 		fmt.Fprintf(&b, "Binary file %s (%d bytes)\n", path, len(data))
 		return b.Bytes()
 	}
@@ -73,4 +76,10 @@ func UntrackedDiff(path string, data []byte) []byte {
 		b.WriteString("\\ No newline at end of file\n")
 	}
 	return b.Bytes()
+}
+
+// UntrackedLinkDiff presents an untracked symbolic link like git does: the
+// link target as the file content.
+func UntrackedLinkDiff(path, target string) []byte {
+	return []byte(fmt.Sprintf("diff --git a/%s b/%s\nnew file mode 120000 (untracked symbolic link)\n--- /dev/null\n+++ b/%s\n@@ -0,0 +1 @@\n+%s\n\\ No newline at end of file\n", path, path, path, target))
 }
