@@ -1,7 +1,6 @@
 package git
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -43,27 +42,57 @@ type Snapshot struct {
 	// Ignored lists untracked ignored entries inside the workspace;
 	// directories end with "/" and cover everything below them.
 	Ignored []string
+	// IgnoredErr is set when the ignored entries could not be read; the
+	// changes are still valid and the caller keeps its previous ignored set.
+	IgnoredErr error
+	// Stale is set when HEAD moved between the two status reads even after
+	// a retry, so the two halves may not belong together (DESIGN 7.2).
+	Stale bool
 }
 
-// Snapshot reads the working changes and the ignored entries.
+// Snapshot reads the working changes and the ignored entries. The two
+// reads are separate commands; if HEAD differs between them the snapshot is
+// read once more and marked Stale when it still differs.
 func (r *Repo) Snapshot(ctx context.Context) (*Snapshot, error) {
-	out, err := r.Run(ctx, "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all", "--ignore-submodules=dirty")
-	if err != nil {
-		return nil, err
+	var s *Snapshot
+	for range 2 {
+		var head string
+		var err error
+		s, head, err = r.snapshotOnce(ctx)
+		if err != nil {
+			return nil, err
+		}
+		s.Stale = s.IgnoredErr == nil && head != s.HeadOID
+		if !s.Stale {
+			break
+		}
 	}
-	s, err := r.parseStatus(out)
+	s.Revision = r.revision.Add(1)
+	return s, nil
+}
+
+func (r *Repo) snapshotOnce(ctx context.Context) (s *Snapshot, ignoredHead string, err error) {
+	// --no-ahead-behind: the upstream distance is not shown and can take a
+	// long commit walk on a diverged branch.
+	out, err := r.Run(ctx, "status", "--porcelain=v2", "-z", "--branch", "--no-ahead-behind", "--untracked-files=all", "--ignore-submodules=dirty")
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	if s, err = r.parseStatus(out); err != nil {
+		return nil, "", err
 	}
 	// Untracked directories stay collapsed here so that a large ignored
 	// tree (node_modules, build output) is one entry.
-	ign, err := r.Run(ctx, "status", "--porcelain=v2", "-z", "--untracked-files=normal", "--ignored=traditional", "--ignore-submodules=all")
+	ign, err := r.Run(ctx, "status", "--porcelain=v2", "-z", "--branch", "--no-ahead-behind", "--untracked-files=normal", "--ignored=traditional", "--ignore-submodules=all")
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, "", err
+		}
+		s.IgnoredErr = err
+		return s, s.HeadOID, nil
 	}
-	s.Ignored = r.parseIgnored(ign)
-	s.Revision = r.revision.Add(1)
-	return s, nil
+	s.Ignored, ignoredHead = r.parseIgnored(ign)
+	return s, ignoredHead, nil
 }
 
 func (r *Repo) parseStatus(out []byte) (*Snapshot, error) {
@@ -112,7 +141,9 @@ func (r *Repo) parseStatus(out []byte) (*Snapshot, error) {
 			}
 			r.add(s, FileChange{RepoPath: f[10], Index: f[1][0], Worktree: f[1][1], Kind: ChangeUnmerged, Submodule: f[2][0] == 'S'})
 		case '?':
-			r.add(s, FileChange{RepoPath: strings.TrimPrefix(rec, "? "), Index: '?', Worktree: '?', Kind: ChangeUntracked})
+			// An untracked nested repository is reported as "dir/".
+			p := strings.TrimSuffix(strings.TrimPrefix(rec, "? "), "/")
+			r.add(s, FileChange{RepoPath: p, Index: '?', Worktree: '?', Kind: ChangeUntracked})
 		}
 	}
 	return s, nil
@@ -137,16 +168,25 @@ func (r *Repo) add(s *Snapshot, c FileChange) {
 	}
 }
 
-func (r *Repo) parseIgnored(out []byte) []string {
-	var ign []string
-	for rec := range bytes.SplitSeq(out, []byte{0}) {
-		p, ok := bytes.CutPrefix(rec, []byte("! "))
-		if !ok {
-			continue
-		}
-		if rel, in := r.FromGit(string(p)); in {
-			ign = append(ign, rel)
+// parseIgnored returns the ignored entries and the HEAD the read saw. A
+// rename record is followed by its original path as a separate field, which
+// must not be taken for a record of its own.
+func (r *Repo) parseIgnored(out []byte) (ign []string, head string) {
+	recs := strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00")
+	for i := 0; i < len(recs); i++ {
+		rec := recs[i]
+		switch {
+		case strings.HasPrefix(rec, "2 "):
+			i++
+		case strings.HasPrefix(rec, "# branch.oid "):
+			if oid := strings.TrimPrefix(rec, "# branch.oid "); oid != "(initial)" {
+				head = oid
+			}
+		case strings.HasPrefix(rec, "! "):
+			if rel, in := r.FromGit(strings.TrimPrefix(rec, "! ")); in {
+				ign = append(ign, rel)
+			}
 		}
 	}
-	return ign
+	return ign, head
 }

@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,7 +88,7 @@ func TestParseStatus(t *testing.T) {
 
 func TestParseIgnored(t *testing.T) {
 	r := &Repo{Prefix: "app/"}
-	got := r.parseIgnored(nul("? app/untracked.md", "! app/node_modules/", "! app/debug.log", "! other/x.log"))
+	got, _ := r.parseIgnored(nul("? app/untracked.md", "! app/node_modules/", "! app/debug.log", "! other/x.log"))
 	if want := []string{"node_modules/", "debug.log"}; !slices.Equal(got, want) {
 		t.Errorf("ignored = %v, want %v", got, want)
 	}
@@ -220,4 +221,45 @@ func runGit(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	return cmd.Run()
+}
+
+func TestParseIgnoredSkipsRenameOrigins(t *testing.T) {
+	r := &Repo{}
+	out := nul(
+		"# branch.oid 3333333333333333333333333333333333333333",
+		"2 R. N... 100644 100644 100644 a a R100 final.md", "! draft.md",
+		"! real.log",
+	)
+	got, head := r.parseIgnored(out)
+	if !slices.Equal(got, []string{"real.log"}) || head != "3333333333333333333333333333333333333333" {
+		t.Errorf("ignored = %v head = %q", got, head)
+	}
+}
+
+func TestUntrackedNestedRepositoryHasNoTrailingSlash(t *testing.T) {
+	s, err := (&Repo{}).parseStatus(nul("? vendor/x/"))
+	if err != nil || len(s.Changes) != 1 || s.Changes[0].Path != "vendor/x" || s.Changes[0].RepoPath != "vendor/x" {
+		t.Errorf("changes = %+v %v", s.Changes, err)
+	}
+}
+
+// Commands for one repository run one at a time; a waiting command gives
+// up when its context ends.
+func TestRunIsSerializedPerRepository(t *testing.T) {
+	hermetic(t)
+	g := detect(t)
+	r, err := g.Open(context.Background(), newRepo(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.sem <- struct{}{} // another command is running
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := r.Run(ctx, "status"); !errors.Is(err, context.Canceled) {
+		t.Errorf("waiting Run = %v", err)
+	}
+	<-r.sem
+	if _, err := r.Run(context.Background(), "status"); err != nil {
+		t.Errorf("Run after release: %v", err)
+	}
 }
