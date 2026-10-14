@@ -63,9 +63,16 @@ func (m *Model) enumerate() tea.Cmd {
 	m.finder = finder{enumerating: true, paths: []string{}, query: m.finder.query}
 	ch := make(chan finderBatchMsg, 4)
 	ws := m.ws
+	// The ignored set is replaced, never modified, so the walk can read
+	// the one current when it started.
+	gs := gitState{ignored: m.git.ignored}
+	if m.showIgnored {
+		gs.ignored = nil
+	}
+	skip := func(rel string) bool { return path.Base(rel) == ".git" || gs.isIgnored(rel) }
 	go func() {
 		defer close(ch)
-		reason, err := ws.Enumerate(ctx, finderLimits, func(rel string) bool { return path.Base(rel) == ".git" }, func(b []string) {
+		reason, err := ws.Enumerate(ctx, finderLimits, skip, func(b []string) {
 			select {
 			case ch <- finderBatchMsg{ticket: ticket, paths: b}:
 			case <-ctx.Done():

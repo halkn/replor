@@ -112,6 +112,7 @@ gh-miniの「ディレクトリを開いて、ファイル・README・Git差分�
 | `d` | ファイルのDiff、またはChangesへ移動 |
 | `s` | PreviewとSourceの切替（Markdownのみ。閲覧位置はソース行で引き継ぐ） |
 | `e` | ファイルツリーの表示／非表示 |
+| `i` | Gitが無視する未追跡ファイルの表示／非表示（ツリーとファインダー共通。既定は非表示） |
 | `c` | Files と Changes の切替（P1-07） |
 | `b` | Changes 内の Working と Branch の切替（P1-08） |
 | `Backspace` | 履歴を戻る |

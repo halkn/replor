@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/halkn/replor/internal/process"
@@ -137,12 +138,17 @@ type Repo struct {
 	Toplevel string
 	// Prefix is the workspace directory relative to Toplevel ("" or "sub/dir/").
 	Prefix string
+
+	revision atomic.Uint64
+	// sem runs the commands of one repository one at a time (DESIGN 7.3):
+	// a cancelled command may still be exiting when the next one starts.
+	sem chan struct{}
 }
 
 // Open resolves the repository containing dir. A directory outside any
 // repository yields ErrNotRepository.
 func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
-	r := &Repo{git: g, dir: dir}
+	r := &Repo{git: g, dir: dir, sem: make(chan struct{}, 1)}
 	out, err := r.run(ctx, nil, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
 		var pe *process.Error
@@ -264,6 +270,12 @@ func (r *Repo) isPartialClone(ctx context.Context) (bool, error) {
 }
 
 func (r *Repo) run(ctx context.Context, extraEnv []string, args ...string) ([]byte, error) {
+	select {
+	case r.sem <- struct{}{}:
+		defer func() { <-r.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	res, err := process.Run(ctx, process.Spec{
 		Path:      r.git.Path,
 		Args:      append(r.git.globalArgs(), args...),

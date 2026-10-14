@@ -177,6 +177,9 @@ func TestContractSuppressesExternalProgramsAndWrites(t *testing.T) {
 			t.Errorf("%v: %v", c, err)
 		}
 	}
+	if _, err := r.Snapshot(ctx); err != nil {
+		t.Errorf("Snapshot: %v", err)
+	}
 
 	entries, _ := os.ReadDir(markers)
 	if len(entries) > 0 {

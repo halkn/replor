@@ -24,6 +24,10 @@ type treeRow struct {
 
 type tree struct {
 	rows []treeRow
+	// selected is the path under the cursor. Re-listings replace rows (and
+	// the ignored filter changes which exist), so the cursor is restored by
+	// path, also once a subtree that holds it arrives later.
+	selected string
 	// expanded survives re-listings, which replace rows wholesale.
 	expanded    map[string]bool
 	cursor      int
@@ -59,10 +63,20 @@ func (m *Model) applyDir(msg dirListedMsg) tea.Cmd {
 	if !m.latest.Accept(msg.ticket) {
 		return nil
 	}
+	viewing := ""
+	if m.viewer.target != nil {
+		viewing = m.viewer.target.Path
+	}
 	children := func(depth int) []treeRow {
-		rows := make([]treeRow, len(msg.nodes))
-		for i, n := range msg.nodes {
-			rows[i] = treeRow{node: n, depth: depth}
+		rows := make([]treeRow, 0, len(msg.nodes))
+		for _, n := range msg.nodes {
+			// The file being viewed stays reachable even when ignored
+			// (DESIGN 6.2); it is marked as ignored instead.
+			shown := viewing == n.Rel || strings.HasPrefix(viewing, n.Rel+"/")
+			if !m.showIgnored && !shown && m.git.isIgnored(n.Rel) {
+				continue
+			}
+			rows = append(rows, treeRow{node: n, depth: depth})
 		}
 		return rows
 	}
@@ -75,7 +89,7 @@ func (m *Model) applyDir(msg dirListedMsg) tea.Cmd {
 		m.tree.rootErr, m.tree.rootCut = "", msg.truncated
 		rows, reload := m.tree.restoreExpanded(children(0))
 		m.tree.rows = rows
-		m.tree.cursor = min(m.tree.cursor, max(len(m.tree.rows)-1, 0))
+		m.tree.restoreCursor()
 		return tea.Batch(append(m.listDirs(reload), m.openDefault())...)
 	}
 	i := m.tree.indexOf(msg.dir)
@@ -92,6 +106,7 @@ func (m *Model) applyDir(msg dirListedMsg) tea.Cmd {
 	end := m.tree.subtreeEnd(i)
 	kids, reload := m.tree.restoreExpanded(children(r.depth + 1))
 	m.tree.rows = append(append(append([]treeRow{}, m.tree.rows[:i+1]...), kids...), m.tree.rows[end:]...)
+	m.tree.restoreCursor()
 	return tea.Batch(m.listDirs(reload)...)
 }
 
@@ -114,6 +129,23 @@ func (t *tree) restoreExpanded(fresh []treeRow) (rows []treeRow, reload []string
 		}
 	}
 	return fresh, reload
+}
+
+func (t *tree) setCursor(i int) {
+	t.cursor = min(max(i, 0), max(len(t.rows)-1, 0))
+	if t.cursor < len(t.rows) {
+		t.selected = t.rows[t.cursor].node.Rel
+	}
+}
+
+// restoreCursor moves the cursor to the selected path if it is listed; if
+// not (yet), the cursor only stays within the rows and selected is kept.
+func (t *tree) restoreCursor() {
+	if i := t.indexOf(t.selected); i >= 0 {
+		t.cursor = i
+		return
+	}
+	t.cursor = min(t.cursor, max(len(t.rows)-1, 0))
 }
 
 func (t *tree) indexOf(rel string) int {
@@ -167,7 +199,7 @@ func (m *Model) openDefault() tea.Cmd {
 	}
 	for i, r := range m.tree.rows {
 		if r.node.Kind == workspace.NodeFile && isReadme(r.node.Name) {
-			m.tree.cursor = i
+			m.tree.setCursor(i)
 			return m.open(Target{Path: r.node.Rel}, preview.Position{}, nil, false)
 		}
 	}
@@ -186,17 +218,17 @@ func (m *Model) treeKey(s string) tea.Cmd {
 	}
 	switch s {
 	case "j", "down":
-		t.cursor = min(t.cursor+1, len(t.rows)-1)
+		t.setCursor(t.cursor + 1)
 	case "k", "up":
-		t.cursor = max(t.cursor-1, 0)
+		t.setCursor(t.cursor - 1)
 	case "g", "home":
-		t.cursor = 0
+		t.setCursor(0)
 	case "G", "end":
-		t.cursor = len(t.rows) - 1
+		t.setCursor(len(t.rows) - 1)
 	case "pgdown":
-		t.cursor = min(t.cursor+m.bodyHeight(), len(t.rows)-1)
+		t.setCursor(t.cursor + m.bodyHeight())
 	case "pgup":
-		t.cursor = max(t.cursor-m.bodyHeight(), 0)
+		t.setCursor(t.cursor - m.bodyHeight())
 	case "l", "right":
 		if r := t.rows[t.cursor]; r.node.Kind == workspace.NodeDir && !r.expanded {
 			return m.toggleDir(t.cursor)
@@ -209,7 +241,7 @@ func (m *Model) treeKey(s string) tea.Cmd {
 		// Move to the parent directory row.
 		for i := t.cursor - 1; i >= 0; i-- {
 			if t.rows[i].depth < r.depth {
-				t.cursor = i
+				t.setCursor(i)
 				break
 			}
 		}
