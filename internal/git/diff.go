@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/halkn/replor/internal/process"
 )
 
 // Scope is one of the comparisons of DESIGN 7.1.
@@ -20,9 +22,16 @@ func (s Scope) String() string {
 	return [...]string{"unstaged", "staged", "untracked"}[s]
 }
 
-// ErrNoGitDiff is returned for scopes that git does not compare (untracked
-// files are shown from the work tree by the caller).
-var ErrNoGitDiff = errors.New("no git diff for this scope")
+var (
+	// ErrNoGitDiff is returned for scopes that git does not compare
+	// (untracked files are shown from the work tree by the caller).
+	ErrNoGitDiff = errors.New("no git diff for this scope")
+	// ErrOutsideWorkspace refuses a diff whose new side lies outside the
+	// workspace: its content must not be shown (DESIGN 6.1).
+	ErrOutsideWorkspace = errors.New("the changed file is outside the workspace")
+	// ErrDiffTooLarge is returned when the diff exceeds the given limit.
+	ErrDiffTooLarge = errors.New("diff is too large to show")
+)
 
 // diffArgs fix the output format regardless of user config: prefixes
 // (diff.noprefix, diff.mnemonicPrefix), paths relative to the top level
@@ -33,10 +42,20 @@ var diffArgs = []string{
 	"--ignore-submodules=dirty", "--submodule=short",
 }
 
-// Diff returns the unified diff of one change. Both paths of a rename are
-// passed so that git pairs them.
-func (r *Repo) Diff(ctx context.Context, scope Scope, c FileChange) ([]byte, error) {
+// Diff returns the unified diff of one change, at most max bytes (0 = the
+// default command limit). Both paths of a rename or copy are passed so that
+// git pairs them, but only paths inside the workspace: a source outside is
+// left out and the file then shows as added.
+func (r *Repo) Diff(ctx context.Context, scope Scope, c FileChange, max int64) ([]byte, error) {
+	if c.Path == "" {
+		return nil, ErrOutsideWorkspace
+	}
 	args := append([]string{}, diffArgs...)
+	if c.Kind == ChangeCopied && c.OrigPath != "" {
+		// status may report copies (status.renames=copies); an unmodified
+		// source is only considered with --find-copies-harder.
+		args = append(args, "-C", "--find-copies-harder")
+	}
 	switch scope {
 	case ScopeStaged:
 		// Before the first commit --cached compares with the empty tree.
@@ -46,10 +65,17 @@ func (r *Repo) Diff(ctx context.Context, scope Scope, c FileChange) ([]byte, err
 		return nil, fmt.Errorf("%w: %v", ErrNoGitDiff, scope)
 	}
 	args = append(args, "--", r.cwdRel(c.RepoPath))
-	if c.RepoOrigPath != "" {
+	if c.OrigPath != "" {
 		args = append(args, r.cwdRel(c.RepoOrigPath))
 	}
-	return r.Run(ctx, args...)
+	if max <= 0 {
+		max = defaultMaxOutput
+	}
+	out, err := r.runMax(ctx, max, args...)
+	if errors.Is(err, process.ErrOutputLimit) {
+		return nil, fmt.Errorf("%w (over %d KiB)", ErrDiffTooLarge, max>>10)
+	}
+	return out, err
 }
 
 // cwdRel turns a toplevel-relative path into one relative to the workspace
