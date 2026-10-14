@@ -60,9 +60,12 @@ func (m *Model) applyDir(msg dirListedMsg) tea.Cmd {
 		return nil
 	}
 	children := func(depth int) []treeRow {
-		rows := make([]treeRow, len(msg.nodes))
-		for i, n := range msg.nodes {
-			rows[i] = treeRow{node: n, depth: depth}
+		rows := make([]treeRow, 0, len(msg.nodes))
+		for _, n := range msg.nodes {
+			if !m.showIgnored && m.git.isIgnored(n.Rel) {
+				continue
+			}
+			rows = append(rows, treeRow{node: n, depth: depth})
 		}
 		return rows
 	}

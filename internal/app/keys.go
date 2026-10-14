@@ -23,6 +23,7 @@ var keyHelp = [][2]string{
 	{"t", "table of contents"},
 	{"s", "switch a Markdown file between Preview and Source"},
 	{"e", "show / hide the file tree"},
+	{"i", "show / hide files ignored by git"},
 	{"r", "reload the tree and the document"},
 	{"Esc", "close a panel, clear the link selection and search"},
 	{"?", "this help"},
@@ -73,6 +74,8 @@ func (m *Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.overlay = overlayHelp
 	case "f":
 		return m, m.openFinder()
+	case "i":
+		return m, m.toggleIgnored()
 	case "/":
 		if v.rendered() == nil {
 			m.status = "nothing to search"

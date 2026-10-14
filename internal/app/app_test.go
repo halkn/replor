@@ -39,7 +39,7 @@ func run(t *testing.T, m *Model, cmd tea.Cmd) {
 		return
 	}
 	switch msg.(type) {
-	case dirListedMsg, loadedMsg, finderBatchMsg, finderRankedMsg:
+	case dirListedMsg, loadedMsg, finderBatchMsg, finderRankedMsg, gitMsg:
 		drive(t, m, msg)
 	}
 }
@@ -68,6 +68,7 @@ func typeText(t *testing.T, m *Model, s string) {
 
 func start(t *testing.T, target string, w, h int) *Model {
 	t.Helper()
+	isolateGit(t)
 	ws, err := workspace.Open(target)
 	if err != nil {
 		t.Fatal(err)
@@ -464,6 +465,7 @@ func TestFocusStaysVisibleWhenTextAboveGrows(t *testing.T) {
 
 func startWithImages(t *testing.T, target string, mode preview.ImageMode, w, h int) (*Model, tea.Cmd) {
 	t.Helper()
+	isolateGit(t)
 	ws, err := workspace.Open(target)
 	if err != nil {
 		t.Fatal(err)

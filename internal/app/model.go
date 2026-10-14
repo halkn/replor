@@ -67,6 +67,9 @@ type Model struct {
 	tree   tree
 	viewer viewer
 	finder finder
+	git    gitState
+	// showIgnored also lists untracked files that git ignores.
+	showIgnored bool
 
 	back, fwd []HistoryEntry
 
@@ -89,7 +92,7 @@ func New(ws *workspace.Workspace, opts Options) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return m.listDir(".")
+	return tea.Batch(m.listDir("."), m.loadGit())
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -104,6 +107,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyLoad(msg)
 	case finderBatchMsg:
 		return m, m.applyFinderBatch(msg)
+	case gitMsg:
+		return m, m.applyGit(msg)
 	case finderRankedMsg:
 		m.applyRanked(msg)
 		return m, nil

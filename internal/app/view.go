@@ -66,7 +66,7 @@ func clean(s string) string { return document.Sanitize(s) }
 
 func (m *Model) header() string {
 	var b strings.Builder
-	b.WriteString(" " + clean(path.Base(m.ws.Root)))
+	b.WriteString(" " + clean(path.Base(m.ws.Root)) + "  " + m.headerGit())
 	v := &m.viewer
 	if v.target != nil {
 		b.WriteString("  " + clean(v.target.Path))
@@ -163,16 +163,25 @@ func (m *Model) treeRow(i, w int) string {
 	case r.truncated:
 		suffix = fmt.Sprintf(" (first %d)", maxDirEntries)
 	}
-	text := fit(strings.Repeat("  ", r.depth)+icon+name+suffix, w)
+	// The last two cells hold the git mark: a status letter for files, a
+	// dot for directories with changes below.
+	gitMark := " "
+	switch {
+	case m.git.isIgnored(r.node.Rel):
+		gitMark = dim.Render("!")
+	case m.git.marks[r.node.Rel] != 0:
+		gitMark = styledMark(m.git.marks[r.node.Rel])
+	case m.git.dirty[r.node.Rel]:
+		gitMark = markStyles['M'].Render("•")
+	}
+	text := fit(strings.Repeat("  ", r.depth)+icon+name+suffix, w-2)
 	switch {
 	case i == m.tree.cursor && m.focus == paneFiles:
-		return selected.Render(text)
-	case i == m.tree.cursor:
-		return dim.Render(text)
-	case r.node.Kind == workspace.NodeBroken:
-		return dim.Render(text)
+		text = selected.Render(text)
+	case i == m.tree.cursor, r.node.Kind == workspace.NodeBroken, m.git.isIgnored(r.node.Rel):
+		text = dim.Render(text)
 	}
-	return text
+	return text + " " + gitMark
 }
 
 // fit truncates or pads s to exactly w cells.
