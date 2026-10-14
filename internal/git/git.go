@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/halkn/replor/internal/process"
@@ -137,6 +138,8 @@ type Repo struct {
 	Toplevel string
 	// Prefix is the workspace directory relative to Toplevel ("" or "sub/dir/").
 	Prefix string
+
+	revision atomic.Uint64
 }
 
 // Open resolves the repository containing dir. A directory outside any
