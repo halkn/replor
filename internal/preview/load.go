@@ -31,6 +31,7 @@ const (
 	KindImage
 	KindBinary
 	KindEmpty
+	KindDiff // produced by the caller from git output (DiffLines)
 )
 
 // Request asks for one file rendered at one width.
@@ -93,7 +94,7 @@ func Load(ctx context.Context, req Request) (Result, error) {
 	}
 
 	text := string(data)
-	if !isMarkdown(req.Path) {
+	if !IsMarkdown(req.Path) {
 		res.Kind = KindText
 		res.Rendered = SourceLines(req.Path, text, req.Width)
 		return res, nil
@@ -144,7 +145,8 @@ func Load(ctx context.Context, req Request) (Result, error) {
 	return res, nil
 }
 
-func isMarkdown(p string) bool {
+// IsMarkdown reports whether a path is rendered as Markdown.
+func IsMarkdown(p string) bool {
 	switch strings.ToLower(path.Ext(p)) {
 	case ".md", ".markdown", ".mdown", ".mkd":
 		return true
