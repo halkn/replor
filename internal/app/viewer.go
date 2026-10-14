@@ -314,12 +314,15 @@ func (m *Model) goForward() tea.Cmd {
 // the reading position by source line.
 func (m *Model) toggleSource() tea.Cmd {
 	v := &m.viewer
-	if v.target == nil || v.res.Kind != preview.KindMarkdown {
+	if !m.canToggleSource() {
 		m.status = "Preview/Source applies to Markdown files"
 		return nil
 	}
-	line := v.sourceLineOf()
 	t := *v.target
+	if t.Mode == ModeDiff {
+		return m.open(Target{Path: t.Path, Mode: ModeSource}, preview.Position{}, nil, false)
+	}
+	line := v.sourceLineOf()
 	if t.Mode == ModeSource {
 		t.Mode = ModePreview
 	} else {
@@ -328,6 +331,16 @@ func (m *Model) toggleSource() tea.Cmd {
 	cmd := m.open(t, preview.Position{}, nil, false)
 	v.sourceLine = line
 	return cmd
+}
+
+// canToggleSource decides both `s` and whether the Preview/Source tabs are
+// offered (DESIGN 4.1: no tab that cannot be shown).
+func (m *Model) canToggleSource() bool {
+	v := &m.viewer
+	if v.target == nil || !preview.IsMarkdown(v.target.Path) {
+		return false
+	}
+	return v.target.Mode == ModeDiff || v.res.Kind == preview.KindMarkdown
 }
 
 func (m *Model) search(query string) {
@@ -411,7 +424,24 @@ func (m *Model) followLink() tea.Cmd {
 	return m.open(Target{Path: target.Path}, preview.Position{}, nil, true)
 }
 
+// relayout re-renders after the viewer width changed. A diff is not wrapped,
+// so its rendering is reused.
+func (m *Model) relayout() tea.Cmd {
+	v := &m.viewer
+	if t := v.target; t != nil && t.Mode == ModeDiff && v.rendered() != nil {
+		m.clampTop()
+		return nil
+	}
+	v.savePos()
+	return m.load()
+}
+
 func (m *Model) reload() tea.Cmd {
 	m.viewer.savePos()
-	return tea.Batch(m.refreshTree(), m.load(), m.invalidateFinder(), m.loadGit())
+	cmds := []tea.Cmd{m.refreshTree(), m.invalidateFinder(), m.loadGit()}
+	// A diff is reloaded by applyGit once the new snapshot is in.
+	if t := m.viewer.target; t == nil || t.Mode != ModeDiff {
+		cmds = append(cmds, m.load())
+	}
+	return tea.Batch(cmds...)
 }

@@ -104,10 +104,10 @@ func (m *Model) tabs() []string {
 		return bar.Render(" " + label + " ")
 	}
 	var out []string
-	if preview.IsMarkdown(t.Path) {
+	if m.canToggleSource() {
 		out = append(out, tab("Preview", t.Mode == ModePreview), tab("Source", t.Mode == ModeSource))
 	}
-	scopes, _ := scopesFor(m.git.snap, t.Path)
+	scopes, _ := m.git.scopesFor(t.Path)
 	if t.Mode == ModeDiff {
 		out = append(out, tab("Diff "+t.Scope.String(), true))
 	} else if len(scopes) > 0 {
@@ -141,7 +141,11 @@ func (m *Model) changesLines(h int) []string {
 	w := m.sideWidth()
 	c := &m.changes
 	if len(c.entries) == 0 {
-		out := []string{dim.Render(fit("No changes", w))}
+		msg := "No changes"
+		if m.git.phase == gitFailed {
+			msg = "git: " + clean(m.git.reason)
+		}
+		out := []string{dim.Render(fit(msg, w))}
 		for len(out) < h {
 			out = append(out, strings.Repeat(" ", w))
 		}
@@ -167,7 +171,10 @@ func (m *Model) changesLines(h int) []string {
 			cur = i
 		}
 	}
-	if cur < c.top {
+	// Scrolling up onto the first entry of a section reveals its heading.
+	if top := cur; top > 0 && rows[top-1].entry < 0 && top-1 < c.top {
+		c.top = top - 1
+	} else if cur < c.top {
 		c.top = cur
 	}
 	if cur >= c.top+h {

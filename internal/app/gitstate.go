@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,6 +13,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/halkn/replor/internal/git"
+	"github.com/halkn/replor/internal/preview"
 )
 
 type gitPhase int
@@ -36,7 +38,47 @@ type gitState struct {
 	dirty   map[string]bool // directories containing changes
 	ignored map[string]bool // untracked ignored entries; directories end with "/"
 	counts  map[byte]int    // changes per mark, for the header
+	// scopes lists the diffs of each path in the order `d` cycles them;
+	// conflicts holds unmerged paths. Both are derived once per snapshot.
+	scopes    map[string][]git.Scope
+	conflicts map[string]bool
 }
+
+// index derives the per-path lookups from a snapshot.
+func (gs *gitState) index(s *git.Snapshot) {
+	gs.marks, gs.dirty, gs.counts = map[string]byte{}, map[string]bool{}, map[byte]int{}
+	gs.scopes, gs.conflicts = map[string][]git.Scope{}, map[string]bool{}
+	markDirs := func(p string) {
+		for d := path.Dir(nfc(p)); d != "." && d != "/"; d = path.Dir(d) {
+			gs.dirty[d] = true
+		}
+	}
+	for _, c := range s.Changes {
+		gs.counts[mark(c)]++
+		if c.OrigPath != "" {
+			markDirs(c.OrigPath) // a file left this directory
+		}
+		if c.Path == "" {
+			continue // renamed out of the workspace; listed in Changes
+		}
+		gs.marks[nfc(c.Path)] = mark(c)
+		markDirs(c.Path)
+	}
+	for _, e := range buildChanges(s) {
+		p := nfc(e.path())
+		if e.section == sectionConflicts {
+			gs.conflicts[p] = true
+		} else if e.change.Path != "" {
+			gs.scopes[p] = append(gs.scopes[p], e.scope)
+		}
+	}
+	// Unstaged first: it is what the reader is editing.
+	for _, sc := range gs.scopes {
+		slices.SortFunc(sc, func(a, b git.Scope) int { return scopeRank[a] - scopeRank[b] })
+	}
+}
+
+var scopeRank = map[git.Scope]int{git.ScopeUnstaged: 0, git.ScopeStaged: 1, git.ScopeUntracked: 2}
 
 func nfc(s string) string { return norm.NFC.String(s) }
 
@@ -95,29 +137,19 @@ func (m *Model) applyGit(msg gitMsg) tea.Cmd {
 		// ignored set is kept: it only filters, and dropping it would flood
 		// the tree with build output on a transient failure.
 		gs.phase, gs.reason, gs.snap = gitFailed, msg.err.Error(), nil
-		gs.marks, gs.dirty, gs.counts = nil, nil, nil
+		gs.marks, gs.dirty, gs.counts, gs.scopes, gs.conflicts = nil, nil, nil, nil, nil
 		m.rebuildChanges()
+		// A shown diff belonged to the snapshot that is gone (DESIGN 7.2).
+		if t := m.viewer.target; t != nil && t.Mode == ModeDiff {
+			v := &m.viewer
+			v.res, v.err = preview.Result{}, fmt.Errorf("git status failed: %s", gs.reason)
+			return tea.Sequence(m.dropImages()...)
+		}
 		return nil
 	}
 	oldIgnored := gs.ignored
 	gs.phase, gs.reason, gs.snap = gitReady, "", msg.snap
-	gs.marks, gs.dirty, gs.counts = map[string]byte{}, map[string]bool{}, map[byte]int{}
-	markDirs := func(p string) {
-		for d := path.Dir(nfc(p)); d != "." && d != "/"; d = path.Dir(d) {
-			gs.dirty[d] = true
-		}
-	}
-	for _, c := range msg.snap.Changes {
-		gs.counts[mark(c)]++
-		if c.OrigPath != "" {
-			markDirs(c.OrigPath) // a file left this directory
-		}
-		if c.Path == "" {
-			continue // renamed out of the workspace; listed in Changes
-		}
-		gs.marks[nfc(c.Path)] = mark(c)
-		markDirs(c.Path)
-	}
+	gs.index(msg.snap)
 	if msg.snap.IgnoredErr == nil {
 		gs.ignored = map[string]bool{}
 		for _, p := range msg.snap.Ignored {

@@ -103,9 +103,8 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.viewer.savePos()
 		m.width, m.height = msg.Width, msg.Height
-		return m, m.load()
+		return m, m.relayout()
 	case dirListedMsg:
 		return m, m.applyDir(msg)
 	case loadedMsg:

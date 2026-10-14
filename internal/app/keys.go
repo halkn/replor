@@ -70,8 +70,7 @@ func (m *Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if !m.sideVisible() {
 			m.focus = paneViewer
 		}
-		v.savePos()
-		return m, m.load()
+		return m, m.relayout()
 	case "?":
 		m.overlay = overlayHelp
 	case "f":
@@ -99,7 +98,7 @@ func (m *Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		return m, m.toggleDiff()
 	case "c":
-		m.toggleLeft()
+		return m, m.toggleLeft()
 	case ">":
 		m.selectLink(1)
 	case "<":
