@@ -148,6 +148,11 @@ func (t *tree) restoreCursor() {
 	t.cursor = min(t.cursor, max(len(t.rows)-1, 0))
 }
 
+func (t *tree) isExpanded(rel string) bool {
+	i := t.indexOf(rel)
+	return i >= 0 && t.rows[i].expanded
+}
+
 func (t *tree) indexOf(rel string) int {
 	for i, r := range t.rows {
 		if r.node.Rel == rel {

@@ -38,6 +38,8 @@ type HistoryEntry struct {
 // Options are the command-line choices that affect the UI.
 type Options struct {
 	Images preview.ImageMode
+	// Watch reloads what is on screen when files or git state change.
+	Watch bool
 }
 
 type pane int
@@ -73,6 +75,7 @@ type Model struct {
 	git     gitState
 	left    leftMode
 	changes changesState
+	watch   watchState
 	// showIgnored also lists untracked files that git ignores.
 	showIgnored bool
 
@@ -89,6 +92,7 @@ type Model struct {
 // (ws.Selected) is opened once the terminal size is known.
 func New(ws *workspace.Workspace, opts Options) *Model {
 	m := &Model{ws: ws, opts: opts, latest: NewLatest()}
+	m.watch.enabled = opts.Watch
 	m.viewer.linkIdx, m.viewer.sourceLine = -1, -1
 	if ws.Selected != "" {
 		m.viewer.target = &Target{Path: ws.Selected}
@@ -97,7 +101,7 @@ func New(ws *workspace.Workspace, opts Options) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.listDir("."), m.loadGit())
+	return tea.Batch(m.listDir("."), m.loadGit(), m.scheduleWatch())
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -113,6 +117,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyFinderBatch(msg)
 	case gitMsg:
 		return m, m.applyGit(msg)
+	case watchTickMsg:
+		return m, m.scan()
+	case watchScannedMsg:
+		return m, m.applyScan(msg)
 	case finderRankedMsg:
 		m.applyRanked(msg)
 		return m, nil

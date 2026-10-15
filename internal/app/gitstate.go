@@ -31,6 +31,9 @@ type gitState struct {
 	reason string
 	repo   *git.Repo
 	snap   *git.Snapshot
+	// gitDir holds the index and HEAD of this work tree; commonDir the refs
+	// shared by linked worktrees. Their files are watched.
+	gitDir, commonDir string
 
 	// The maps are keyed by NFC paths: macOS can return decomposed names
 	// from the file system while git prints composed ones.
@@ -87,10 +90,11 @@ func (gs *gitState) markOf(rel string) byte { return gs.marks[nfc(rel)] }
 func (gs *gitState) isDirty(rel string) bool { return gs.dirty[nfc(rel)] }
 
 type gitMsg struct {
-	ticket Ticket
-	repo   *git.Repo
-	snap   *git.Snapshot
-	err    error
+	ticket            Ticket
+	repo              *git.Repo
+	snap              *git.Snapshot
+	gitDir, commonDir string
+	err               error
 }
 
 // loadGit reads a snapshot off the UI loop, locating git and the repository
@@ -103,6 +107,9 @@ func (m *Model) loadGit() tea.Cmd {
 		if repo == nil {
 			msg.repo, msg.err = openRepo(ctx, root)
 			if msg.err != nil {
+				return msg
+			}
+			if msg.gitDir, msg.commonDir, msg.err = msg.repo.MetadataDirs(ctx); msg.err != nil {
 				return msg
 			}
 		}
@@ -125,6 +132,9 @@ func (m *Model) applyGit(msg gitMsg) tea.Cmd {
 	}
 	gs := &m.git
 	gs.repo = msg.repo
+	if msg.gitDir != "" {
+		gs.gitDir, gs.commonDir = msg.gitDir, msg.commonDir
+	}
 	switch {
 	case errors.Is(msg.err, git.ErrNotRepository):
 		*gs = gitState{phase: gitNone}

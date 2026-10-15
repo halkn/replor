@@ -1,7 +1,9 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"strings"
 
@@ -82,6 +84,9 @@ func (m *Model) barLine(parts ...string) string {
 func (m *Model) header() string {
 	parts := []string{bar.Render(" " + clean(path.Base(m.ws.Root)) + "  ")}
 	parts = append(parts, m.headerGit()...)
+	if m.watch.limited {
+		parts = append(parts, onBar(dim).Render("  watch partial (r to reload)"))
+	}
 	v := &m.viewer
 	if v.target != nil {
 		parts = append(parts, bar.Render("  "+clean(v.target.Path)), bar.Render(" "))
@@ -314,6 +319,13 @@ func (m *Model) viewerLines(h int) []string {
 		out = m.tocLines(w, h)
 	case v.target == nil:
 		out = []string{dim.Render("Select a file in the tree (Enter), or press ? for help.")}
+	case v.err != nil && m.deleted():
+		// DESIGN 4.3: say that the file is gone and where to see it.
+		msg := clean(v.target.Path) + " was deleted."
+		if scopes, _ := m.git.scopesFor(v.target.Path); len(scopes) > 0 {
+			msg += " Press d to see the change."
+		}
+		out = []string{warn.Render(ansi.Truncate(msg, w, "…"))}
 	case v.err != nil:
 		out = []string{warn.Render(ansi.Truncate(clean("Cannot show "+v.target.Path+": "+v.err.Error()), w, "…"))}
 	case v.rendered() == nil && v.pending:
@@ -329,6 +341,17 @@ func (m *Model) viewerLines(h int) []string {
 		out = append(out, "")
 	}
 	return out[:h]
+}
+
+// deleted reports that the viewed file is missing because it was removed:
+// it was shown before, or git lists it as changed.
+func (m *Model) deleted() bool {
+	v := &m.viewer
+	if !errors.Is(v.err, fs.ErrNotExist) || v.target.Mode == ModeDiff {
+		return false
+	}
+	scopes, _ := m.git.scopesFor(v.target.Path)
+	return v.shown == v.target.Path || len(scopes) > 0
 }
 
 func (m *Model) documentLines(w, h int) []string {

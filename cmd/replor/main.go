@@ -32,6 +32,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fs.PrintDefaults()
 	}
 	images := fs.String("images", "auto", "inline images: auto, kitty, halfblocks or off")
+	noWatch := fs.Bool("no-watch", false, "do not reload when files or git state change (r still reloads)")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -57,7 +58,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	defer ws.Close()
 
-	if _, err := tea.NewProgram(app.New(ws, app.Options{Images: mode})).Run(); err != nil {
+	if _, err := tea.NewProgram(app.New(ws, app.Options{Images: mode, Watch: !*noWatch})).Run(); err != nil {
 		fmt.Fprintln(stderr, "replor:", err)
 		return 1
 	}

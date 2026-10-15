@@ -28,6 +28,9 @@ type viewer struct {
 	sourceLine int
 
 	kittyIDs []uint32
+	// shown is the last path displayed successfully; a missing file that
+	// was shown has been deleted, one never shown may just not exist.
+	shown string
 
 	linkIdx  int
 	query    string
@@ -103,7 +106,7 @@ func (m *Model) applyLoad(msg loadedMsg) tea.Cmd {
 		}
 		return tea.Sequence(cmds...)
 	}
-	v.err, v.res = nil, msg.res
+	v.err, v.res, v.shown = nil, msg.res, msg.target.Path
 	for _, tx := range msg.res.Transmit {
 		cmds = append(cmds, tea.Raw(tx))
 	}
