@@ -185,8 +185,8 @@ func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
 	return r, nil
 }
 
-func (r *Repo) revParsePath(ctx context.Context, flag string) (string, error) {
-	out, err := r.run(ctx, nil, defaultMaxOutput, "rev-parse", flag)
+func (r *Repo) revParsePath(ctx context.Context, flags ...string) (string, error) {
+	out, err := r.run(ctx, nil, defaultMaxOutput, append([]string{"rev-parse"}, flags...)...)
 	if err != nil {
 		return "", err
 	}
@@ -305,3 +305,16 @@ func (r *Repo) FromGit(p string) (rel string, ok bool) {
 
 // ToGit converts a workspace-relative slash path to a toplevel-relative one.
 func (r *Repo) ToGit(rel string) string { return r.Prefix + rel }
+
+// MetadataDirs returns the absolute git directory of this work tree (its
+// index and HEAD) and the common directory shared by linked worktrees
+// (refs, packed-refs). They are the same outside linked worktrees.
+func (r *Repo) MetadataDirs(ctx context.Context) (gitDir, commonDir string, err error) {
+	// One value per call: values are newline-separated and paths may hold
+	// newlines.
+	if gitDir, err = r.revParsePath(ctx, "--path-format=absolute", "--git-dir"); err != nil {
+		return "", "", err
+	}
+	commonDir, err = r.revParsePath(ctx, "--path-format=absolute", "--git-common-dir")
+	return gitDir, commonDir, err
+}

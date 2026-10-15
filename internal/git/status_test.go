@@ -263,3 +263,35 @@ func TestRunIsSerializedPerRepository(t *testing.T) {
 		t.Errorf("Run after release: %v", err)
 	}
 }
+
+// A linked worktree keeps its index and HEAD in its own git directory and
+// shares refs through the common directory.
+func TestMetadataDirsOfWorktree(t *testing.T) {
+	hermetic(t)
+	g := detect(t)
+	repo := newRepo(t)
+	write(t, filepath.Join(repo, "a.md"), "a\n")
+	sh(t, repo, "add", ".")
+	sh(t, repo, "commit", "-qm", "base")
+	wt := filepath.Join(t.TempDir(), "wt")
+	sh(t, repo, "worktree", "add", "-q", "-b", "side", wt)
+
+	r, err := g.Open(context.Background(), wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitDir, common, err := r.MetadataDirs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realRepo, _ := filepath.EvalSymlinks(repo)
+	if want := filepath.Join(realRepo, ".git"); common != want {
+		t.Errorf("common = %q, want %q", common, want)
+	}
+	if !strings.HasPrefix(gitDir, filepath.Join(realRepo, ".git", "worktrees")+string(filepath.Separator)) {
+		t.Errorf("git dir = %q", gitDir)
+	}
+	if _, err := os.Stat(filepath.Join(gitDir, "index")); err != nil {
+		t.Errorf("no index in the worktree git dir: %v", err)
+	}
+}
