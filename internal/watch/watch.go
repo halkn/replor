@@ -9,9 +9,16 @@ package watch
 import (
 	"io/fs"
 	"os"
+	"time"
 
 	"github.com/halkn/replor/internal/workspace"
 )
+
+// racyWindow: an entry modified this recently may be modified again within
+// the same mtime tick (1-2 s on HFS+, FAT) without changing its size, so it
+// is reported as changed until it is older (as git treats "racily clean"
+// index entries).
+const racyWindow = 2 * time.Second
 
 // Set is what one scan looks at.
 type Set struct {
@@ -25,18 +32,27 @@ type sig struct {
 	dir    bool
 	size   int64
 	mtime  int64
+	racy   bool
 }
 
-func sigOf(info fs.FileInfo, err error) sig {
+func sigOf(info fs.FileInfo, err error, now time.Time) sig {
 	if err != nil {
 		return sig{}
 	}
-	return sig{exists: true, dir: info.IsDir(), size: info.Size(), mtime: info.ModTime().UnixNano()}
+	age := now.Sub(info.ModTime())
+	return sig{exists: true, dir: info.IsDir(), size: info.Size(), mtime: info.ModTime().UnixNano(), racy: age >= 0 && age < racyWindow}
+}
+
+// changed compares two signatures of one path. A racy old signature cannot
+// prove that nothing changed.
+func changed(old, cur sig) bool {
+	return old.racy || old.exists != cur.exists || old.dir != cur.dir || old.size != cur.size || old.mtime != cur.mtime
 }
 
 type dirSig struct {
-	self    sig
-	entries map[string]sig
+	exists   bool
+	entries  map[string]sig
+	complete bool // all entries were read (not cut by the limit)
 }
 
 // Snapshot is the result of one scan.
@@ -49,42 +65,78 @@ type Snapshot struct {
 	Limited bool
 }
 
-// Scan stats the set. Directory entries are not followed (Lstat), and at
-// most maxEntries entries are looked at in total.
+// Scan stats the set. Directory entries are not followed (Lstat), ".git" is
+// skipped like in the tree, and at most maxEntries entries are read in
+// total; directories after that are not read at all.
 func Scan(ws *workspace.Workspace, set Set, maxEntries int) *Snapshot {
+	now := time.Now()
 	s := &Snapshot{files: map[string]sig{}, dirs: map[string]dirSig{}, git: map[string]sig{}}
 	for _, f := range set.Files {
-		s.files[f] = sigOf(ws.Stat(f))
+		info, err := ws.Stat(f)
+		s.files[f] = sigOf(info, err, now)
 	}
 	budget := maxEntries
 	for _, d := range set.Dirs {
-		ds := dirSig{self: sigOf(ws.Stat(d)), entries: map[string]sig{}}
-		entries, _ := ws.ReadDir(d)
+		ds := dirSig{entries: map[string]sig{}}
+		if budget <= 0 {
+			s.Limited = true
+			s.dirs[d] = ds
+			continue
+		}
+		// One more than the budget tells a cut from an exact fit.
+		entries, err := ws.ReadDirN(d, budget+1)
+		ds.exists = err == nil
+		ds.complete = len(entries) <= budget
 		for _, e := range entries {
 			if budget <= 0 {
 				s.Limited = true
 				break
 			}
+			if e.Name() == ".git" {
+				continue
+			}
 			budget--
-			ds.entries[e.Name()] = sigOf(e.Info())
+			info, err := e.Info()
+			ds.entries[e.Name()] = sigOf(info, err, now)
 		}
 		s.dirs[d] = ds
 	}
 	for _, g := range set.Git {
-		s.git[g] = sigOf(os.Stat(g))
+		info, err := os.Stat(g)
+		s.git[g] = sigOf(info, err, now)
 	}
 	return s
 }
 
-// Changes lists what differs between two scans. Paths watched in only one
-// of them (the set changed) are not reported.
-type Changes struct {
-	Files []string
-	Dirs  []string
-	Git   bool
+// Merge records seed's signatures as the baseline for their paths. Loaders
+// take the seed just before reading, so a change after the read shows up in
+// the next Compare even if the path was not watched before.
+func (s *Snapshot) Merge(seed *Snapshot) {
+	for k, v := range seed.files {
+		s.files[k] = v
+	}
+	for k, v := range seed.dirs {
+		s.dirs[k] = v
+	}
+	for k, v := range seed.git {
+		s.git[k] = v
+	}
 }
 
-func (c Changes) Empty() bool { return len(c.Files) == 0 && len(c.Dirs) == 0 && !c.Git }
+// Changes lists what differs between two scans. Paths watched in only one
+// of them are not reported.
+type Changes struct {
+	Files []string
+	// Listed are directories whose entry names changed (to be listed
+	// again); Modified are directories where only entry contents changed
+	// (which may change the git status, not the listing).
+	Listed, Modified []string
+	Git              bool
+}
+
+func (c Changes) Empty() bool {
+	return len(c.Files) == 0 && len(c.Listed) == 0 && len(c.Modified) == 0 && !c.Git
+}
 
 // Compare returns the changes from old to cur.
 func Compare(old, cur *Snapshot) Changes {
@@ -93,35 +145,47 @@ func Compare(old, cur *Snapshot) Changes {
 		return ch
 	}
 	for f, s := range cur.files {
-		if o, ok := old.files[f]; ok && o != s {
+		if o, ok := old.files[f]; ok && changed(o, s) {
 			ch.Files = append(ch.Files, f)
 		}
 	}
 	for d, s := range cur.dirs {
 		o, ok := old.dirs[d]
-		if ok && (o.self != s.self || entriesDiffer(o.entries, s.entries, old.Limited || cur.Limited)) {
-			ch.Dirs = append(ch.Dirs, d)
+		if !ok {
+			continue
+		}
+		names, contents := diffEntries(o, s)
+		switch {
+		case o.exists != s.exists || names:
+			ch.Listed = append(ch.Listed, d)
+		case contents:
+			ch.Modified = append(ch.Modified, d)
 		}
 	}
 	for g, s := range cur.git {
-		if o, ok := old.git[g]; ok && o != s {
+		if o, ok := old.git[g]; ok && changed(o, s) {
 			ch.Git = true
 		}
 	}
 	return ch
 }
 
-// entriesDiffer compares directory entries. When a scan was cut short the
-// sets of names differ by the cut, so only common names are compared.
-func entriesDiffer(a, b map[string]sig, limited bool) bool {
-	if !limited && len(a) != len(b) {
-		return true
+// diffEntries reports whether names were added or removed and whether a
+// common entry changed. Names are only compared when both reads were
+// complete; a cut read differs by the cut.
+func diffEntries(a, b dirSig) (names, contents bool) {
+	both := a.complete && b.complete
+	if both && len(a.entries) != len(b.entries) {
+		names = true
 	}
-	for name, s := range b {
-		o, ok := a[name]
-		if ok && o != s || !ok && !limited {
-			return true
+	for name, s := range b.entries {
+		o, ok := a.entries[name]
+		switch {
+		case !ok && both:
+			names = true
+		case ok && changed(o, s):
+			contents = true
 		}
 	}
-	return false
+	return names, contents
 }
