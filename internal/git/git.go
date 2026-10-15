@@ -138,6 +138,10 @@ type Repo struct {
 	Toplevel string
 	// Prefix is the workspace directory relative to Toplevel ("" or "sub/dir/").
 	Prefix string
+	// GitDir holds this work tree's index and HEAD; CommonDir the refs
+	// shared by linked worktrees. Both are absolute and equal outside
+	// linked worktrees.
+	GitDir, CommonDir string
 
 	revision atomic.Uint64
 	// sem runs the commands of one repository one at a time (DESIGN 7.3):
@@ -171,6 +175,12 @@ func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
 		return nil, err
 	}
 	if r.Prefix, err = r.revParsePath(ctx, "--show-prefix"); err != nil {
+		return nil, err
+	}
+	if r.GitDir, err = r.revParsePath(ctx, "--path-format=absolute", "--git-dir"); err != nil {
+		return nil, err
+	}
+	if r.CommonDir, err = r.revParsePath(ctx, "--path-format=absolute", "--git-common-dir"); err != nil {
 		return nil, err
 	}
 	if g.Version.Less(LazyFetchVersion) {
@@ -305,16 +315,3 @@ func (r *Repo) FromGit(p string) (rel string, ok bool) {
 
 // ToGit converts a workspace-relative slash path to a toplevel-relative one.
 func (r *Repo) ToGit(rel string) string { return r.Prefix + rel }
-
-// MetadataDirs returns the absolute git directory of this work tree (its
-// index and HEAD) and the common directory shared by linked worktrees
-// (refs, packed-refs). They are the same outside linked worktrees.
-func (r *Repo) MetadataDirs(ctx context.Context) (gitDir, commonDir string, err error) {
-	// One value per call: values are newline-separated and paths may hold
-	// newlines.
-	if gitDir, err = r.revParsePath(ctx, "--path-format=absolute", "--git-dir"); err != nil {
-		return "", "", err
-	}
-	commonDir, err = r.revParsePath(ctx, "--path-format=absolute", "--git-common-dir")
-	return gitDir, commonDir, err
-}

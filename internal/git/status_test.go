@@ -266,7 +266,7 @@ func TestRunIsSerializedPerRepository(t *testing.T) {
 
 // A linked worktree keeps its index and HEAD in its own git directory and
 // shares refs through the common directory.
-func TestMetadataDirsOfWorktree(t *testing.T) {
+func TestOpenResolvesWorktreeMetadataDirs(t *testing.T) {
 	hermetic(t)
 	g := detect(t)
 	repo := newRepo(t)
@@ -280,10 +280,7 @@ func TestMetadataDirsOfWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gitDir, common, err := r.MetadataDirs(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
+	gitDir, common := r.GitDir, r.CommonDir
 	realRepo, _ := filepath.EvalSymlinks(repo)
 	if want := filepath.Join(realRepo, ".git"); common != want {
 		t.Errorf("common = %q, want %q", common, want)
