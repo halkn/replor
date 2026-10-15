@@ -84,9 +84,6 @@ func (m *Model) barLine(parts ...string) string {
 func (m *Model) header() string {
 	parts := []string{bar.Render(" " + clean(path.Base(m.ws.Root)) + "  ")}
 	parts = append(parts, m.headerGit()...)
-	if m.watch.limited {
-		parts = append(parts, onBar(dim).Render("  watch partial (r to reload)"))
-	}
 	v := &m.viewer
 	if v.target != nil {
 		parts = append(parts, bar.Render("  "+clean(v.target.Path)), bar.Render(" "))
@@ -94,6 +91,10 @@ func (m *Model) header() string {
 	}
 	if v.pending {
 		parts = append(parts, bar.Render("  ⟳"))
+	}
+	// Last, so that a narrow header cuts it before the file and its tabs.
+	if m.watch.limited() {
+		parts = append(parts, onBar(dim).Render("  watch partial (r to reload)"))
 	}
 	return m.barLine(parts...)
 }
@@ -322,7 +323,9 @@ func (m *Model) viewerLines(h int) []string {
 	case v.err != nil && m.deleted():
 		// DESIGN 4.3: say that the file is gone and where to see it.
 		msg := clean(v.target.Path) + " was deleted."
-		if scopes, _ := m.git.scopesFor(v.target.Path); len(scopes) > 0 {
+		if to := m.git.movedTo(v.target.Path); to != "" {
+			msg = clean(v.target.Path) + " was moved to " + clean(to) + "."
+		} else if scopes, _ := m.git.scopesFor(v.target.Path); len(scopes) > 0 {
 			msg += " Press d to see the change."
 		}
 		out = []string{warn.Render(ansi.Truncate(msg, w, "…"))}
@@ -351,7 +354,7 @@ func (m *Model) deleted() bool {
 		return false
 	}
 	scopes, _ := m.git.scopesFor(v.target.Path)
-	return v.shown == v.target.Path || len(scopes) > 0
+	return v.shown == v.target.Path || len(scopes) > 0 || m.git.movedTo(v.target.Path) != ""
 }
 
 func (m *Model) documentLines(w, h int) []string {
@@ -403,6 +406,8 @@ func (m *Model) finderLines(w, h int) []string {
 	switch {
 	case f.err != "":
 		status += " · " + warn.Render("error: "+clean(f.err))
+	case f.stale:
+		status += " · files changed; reopen to rescan"
 	case f.enumerating:
 		status += " · scanning…"
 	case f.reason != "":

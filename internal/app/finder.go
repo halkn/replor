@@ -29,6 +29,9 @@ type finder struct {
 	query   string
 	results []fuzzy.Result
 	cursor  int
+	// stale marks a list that watching found outdated while the finder was
+	// open; it is rescanned on the next open rather than under the cursor.
+	stale bool
 }
 
 type finderBatchMsg struct {
@@ -50,7 +53,7 @@ func (m *Model) openFinder() tea.Cmd {
 	m.overlay = overlayFinder
 	f := &m.finder
 	f.cursor = 0
-	if f.paths == nil && !f.enumerating {
+	if f.stale || f.paths == nil && !f.enumerating {
 		return tea.Batch(m.enumerate(), m.rank())
 	}
 	return m.rank()
@@ -172,6 +175,17 @@ func (m *Model) finderKey(k tea.KeyPressMsg) tea.Cmd {
 		return m.rank()
 	}
 	return nil
+}
+
+// finderStale handles a watched change of directory listings: the list is
+// dropped, or marked stale while the finder is open so that its results and
+// cursor stay put.
+func (m *Model) finderStale() {
+	if m.overlay == overlayFinder {
+		m.finder.stale = true
+		return
+	}
+	m.invalidateFinder()
 }
 
 // invalidateFinder drops the path list (after `r`); an open finder starts

@@ -92,7 +92,6 @@ type Model struct {
 // (ws.Selected) is opened once the terminal size is known.
 func New(ws *workspace.Workspace, opts Options) *Model {
 	m := &Model{ws: ws, opts: opts, latest: NewLatest()}
-	m.watch.enabled = opts.Watch
 	m.viewer.linkIdx, m.viewer.sourceLine = -1, -1
 	if ws.Selected != "" {
 		m.viewer.target = &Target{Path: ws.Selected}

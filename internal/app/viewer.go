@@ -7,6 +7,7 @@ import (
 
 	"github.com/halkn/replor/internal/document"
 	"github.com/halkn/replor/internal/preview"
+	"github.com/halkn/replor/internal/watch"
 )
 
 // firstBlocks is how many Markdown blocks past the reading position are
@@ -28,6 +29,12 @@ type viewer struct {
 	sourceLine int
 
 	kittyIDs []uint32
+
+	// dirty queues a reload behind the running one (refreshViewer).
+	dirty bool
+	// anchor and linkKey identify the top block and the selected link
+	// across a reload of the same file (savePos, follow).
+	anchor, linkKey string
 	// shown is the last path displayed successfully; a missing file that
 	// was shown has been deleted, one never shown may just not exist.
 	shown string
@@ -44,8 +51,59 @@ func (v *viewer) doc() *document.Doc { return v.res.Doc }
 
 // savePos records the reading position before a re-layout.
 func (v *viewer) savePos() {
-	if r := v.rendered(); r != nil {
-		v.pos = r.PositionAt(v.top)
+	r := v.rendered()
+	if r == nil {
+		return
+	}
+	v.pos = r.PositionAt(v.top)
+	// An edit above shifts block numbers; the text of the top block and the
+	// selected link let a reload of the same file find them again.
+	v.anchor = blockText(v.res, v.pos.Block)
+	v.linkKey = ""
+	if d := v.doc(); d != nil && v.linkIdx >= 0 && v.linkIdx < len(d.Links) {
+		v.linkKey = linkKey(d.Links[v.linkIdx])
+	}
+}
+
+// blockText is the content of block b: Markdown source, or the line of a
+// source or diff view (one line per block).
+func blockText(res preview.Result, b int) string {
+	switch {
+	case res.Doc != nil && b < len(res.Doc.Blocks):
+		return res.Doc.BlockSource(b)
+	case res.Rendered != nil && b < len(res.Rendered.BlockLine):
+		return res.Rendered.Plain[res.Rendered.BlockLine[b]]
+	}
+	return ""
+}
+
+func linkKey(l document.DocLink) string { return l.Dest + "\x00" + l.Text }
+
+// nearest returns the index closest to want among 0..n-1 for which match
+// holds, or -1.
+func nearest(n, want int, match func(int) bool) int {
+	for d := 0; d < n; d++ {
+		if i := want - d; i >= 0 && i < n && match(i) {
+			return i
+		}
+		if i := want + d; d > 0 && i < n && match(i) {
+			return i
+		}
+	}
+	return -1
+}
+
+// follow maps the saved position and link selection onto a reloaded file.
+func (v *viewer) follow(res preview.Result) {
+	if v.anchor != "" {
+		n := len(res.Rendered.BlockLine)
+		if b := nearest(n, v.pos.Block, func(i int) bool { return blockText(res, i) == v.anchor }); b >= 0 {
+			v.pos.Block = b
+		}
+	}
+	if v.linkKey != "" && res.Doc != nil {
+		links := res.Doc.Links
+		v.linkIdx = nearest(len(links), v.linkIdx, func(i int) bool { return linkKey(links[i]) == v.linkKey })
 	}
 }
 
@@ -54,6 +112,7 @@ type loadedMsg struct {
 	target Target
 	res    preview.Result
 	err    error
+	seed   *watch.Snapshot // the file as seen before it was read
 	// revision is the git snapshot a diff was made from (ModeDiff only).
 	revision uint64
 }
@@ -83,8 +142,9 @@ func (m *Model) request(blocks int) tea.Cmd {
 	req := preview.Request{WS: m.ws, Path: t.Path, Source: t.Mode == ModeSource, Width: m.viewerWidth(), Images: m.opts.Images, Blocks: blocks}
 	target := *t
 	return func() tea.Msg {
+		seed := watch.Scan(req.WS, watch.Set{Files: []string{req.Path}}, 0)
 		res, err := preview.Load(ctx, req)
-		return loadedMsg{ticket: ticket, target: target, res: res, err: err}
+		return loadedMsg{ticket: ticket, target: target, res: res, err: err, seed: seed}
 	}
 }
 
@@ -97,6 +157,7 @@ func (m *Model) applyLoad(msg loadedMsg) tea.Cmd {
 	}
 	v := &m.viewer
 	v.pending = false
+	m.watch.seed(msg.seed)
 	cmds := m.dropImages()
 	if msg.err != nil {
 		v.err, v.res = msg.err, preview.Result{}
@@ -104,7 +165,7 @@ func (m *Model) applyLoad(msg loadedMsg) tea.Cmd {
 		if m.overlay == overlayTOC {
 			m.overlay = overlayNone
 		}
-		return tea.Sequence(cmds...)
+		return tea.Sequence(append(cmds, m.queuedReload())...)
 	}
 	v.err, v.res, v.shown = nil, msg.res, msg.target.Path
 	for _, tx := range msg.res.Transmit {
@@ -114,6 +175,7 @@ func (m *Model) applyLoad(msg loadedMsg) tea.Cmd {
 
 	r := v.rendered()
 	if r != nil {
+		v.follow(msg.res)
 		if v.sourceLine >= 0 {
 			v.pos = positionForLine(msg, v.sourceLine)
 			v.sourceLine = -1
@@ -136,13 +198,14 @@ func (m *Model) applyLoad(msg loadedMsg) tea.Cmd {
 	if m.overlay == overlayTOC && (v.doc() == nil || m.tocCursor >= len(v.doc().Headings)) {
 		m.overlay = overlayNone
 	}
-	if msg.res.Note != "" {
+	// A reload repeats the note; it must not replace another message.
+	if msg.res.Note != "" && m.status == "" {
 		m.status = msg.res.Note
 	}
 	if r != nil && !r.Complete {
-		cmds = append(cmds, m.loadFull())
+		return tea.Sequence(append(cmds, m.loadFull())...)
 	}
-	return tea.Sequence(cmds...)
+	return tea.Sequence(append(cmds, m.queuedReload())...)
 }
 
 // positionForLine maps a source line to a position in msg's rendering:
@@ -198,6 +261,7 @@ func (m *Model) open(t Target, pos preview.Position, focus *preview.Position, re
 	v.pos, v.focus, v.top = pos, focus, 0
 	v.res, v.err = preview.Result{}, nil
 	v.linkIdx, v.matches, v.matchIdx = -1, nil, 0
+	v.anchor, v.linkKey, v.dirty = "", "", false
 	return m.load()
 }
 
@@ -425,6 +489,29 @@ func (m *Model) followLink() tea.Cmd {
 		return nil
 	}
 	return m.open(Target{Path: target.Path}, preview.Position{}, nil, true)
+}
+
+// refreshViewer reloads the shown file for a watch event. A load already
+// running is not cancelled (it may be the second pass of a large document);
+// the reload is queued behind it (queuedReload).
+func (m *Model) refreshViewer() tea.Cmd {
+	v := &m.viewer
+	if v.pending {
+		v.dirty = true
+		return nil
+	}
+	v.savePos()
+	return m.load()
+}
+
+func (m *Model) queuedReload() tea.Cmd {
+	v := &m.viewer
+	if !v.dirty {
+		return nil
+	}
+	v.dirty = false
+	v.savePos()
+	return m.load()
 }
 
 // relayout re-renders after the viewer width changed. A diff is not wrapped,

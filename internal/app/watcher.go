@@ -18,10 +18,24 @@ var watchInterval = time.Second
 // it the header shows that watching is partial and `r` is the fallback.
 var watchMaxEntries = 5000
 
+// watchState holds the baseline the next scan is compared with. Loaders
+// merge in what they saw just before reading (watch.Snapshot.Merge).
 type watchState struct {
-	enabled bool
-	last    *watch.Snapshot
-	limited bool
+	last *watch.Snapshot
+}
+
+func (w *watchState) limited() bool { return w.last != nil && w.last.Limited }
+
+// seed records a loader's view of its paths as the baseline.
+func (w *watchState) seed(s *watch.Snapshot) {
+	if s == nil {
+		return
+	}
+	if w.last == nil {
+		w.last = s
+		return
+	}
+	w.last.Merge(s)
 }
 
 type watchTickMsg struct{}
@@ -32,7 +46,7 @@ type watchScannedMsg struct {
 }
 
 func (m *Model) scheduleWatch() tea.Cmd {
-	if !m.watch.enabled {
+	if !m.opts.Watch {
 		return nil
 	}
 	return tea.Tick(watchInterval, func(time.Time) tea.Msg { return watchTickMsg{} })
@@ -62,19 +76,31 @@ func (m *Model) watchSet() watch.Set {
 			set.Dirs = append(set.Dirs, r.node.Rel)
 		}
 	}
-	gs := &m.git
-	if gs.gitDir != "" {
-		set.Git = []string{
-			filepath.Join(gs.gitDir, "index"),
-			filepath.Join(gs.gitDir, "HEAD"),
-			filepath.Join(gs.gitDir, "MERGE_HEAD"),
-			filepath.Join(gs.commonDir, "packed-refs"),
+	if r := m.git.repo; r != nil {
+		branch := ""
+		if m.git.snap != nil {
+			branch = m.git.snap.Branch
 		}
-		if gs.snap != nil && gs.snap.Branch != "" {
-			set.Git = append(set.Git, filepath.Join(gs.commonDir, "refs", "heads", filepath.FromSlash(gs.snap.Branch)))
-		}
+		set.Git = gitWatchFiles(r.GitDir, r.CommonDir, branch)
 	}
 	return set
+}
+
+// gitWatchFiles are the metadata files a commit, checkout, reset or
+// `git add` touches. Refs live either as files (refs/heads) or, with the
+// reftable backend, in tables listed by reftable/tables.list.
+func gitWatchFiles(gitDir, commonDir, branch string) []string {
+	files := []string{
+		filepath.Join(gitDir, "index"),
+		filepath.Join(gitDir, "HEAD"),
+		filepath.Join(gitDir, "MERGE_HEAD"),
+		filepath.Join(commonDir, "packed-refs"),
+		filepath.Join(commonDir, "reftable", "tables.list"),
+	}
+	if branch != "" {
+		files = append(files, filepath.Join(commonDir, "refs", "heads", filepath.FromSlash(branch)))
+	}
+	return files
 }
 
 func (m *Model) applyScan(msg watchScannedMsg) tea.Cmd {
@@ -83,25 +109,23 @@ func (m *Model) applyScan(msg watchScannedMsg) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 	ch := watch.Compare(m.watch.last, msg.snap)
-	m.watch.last, m.watch.limited = msg.snap, msg.snap.Limited
+	m.watch.last = msg.snap
 	if ch.Empty() {
 		return tea.Batch(cmds...)
 	}
 	// Any change in the work tree may change the git status.
-	if m.git.repo != nil {
-		cmds = append(cmds, m.loadGit())
-	}
+	cmds = append(cmds, m.refreshGit())
 	if t := m.viewer.target; t != nil && t.Mode != ModeDiff && slices.Contains(ch.Files, t.Path) {
-		m.viewer.savePos() // a diff is reloaded with the new snapshot
-		cmds = append(cmds, m.load())
+		cmds = append(cmds, m.refreshViewer()) // a diff follows the new snapshot
 	}
-	for _, d := range ch.Dirs {
+	// Only added or removed names change a listing.
+	for _, d := range ch.Listed {
 		if d == "." || m.tree.isExpanded(d) {
 			cmds = append(cmds, m.listDir(d))
 		}
 	}
-	if len(ch.Dirs) > 0 {
-		cmds = append(cmds, m.invalidateFinder())
+	if len(ch.Listed) > 0 {
+		m.finderStale()
 	}
 	return tea.Batch(cmds...)
 }
