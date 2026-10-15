@@ -149,7 +149,7 @@ type Repo struct {
 // repository yields ErrNotRepository.
 func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
 	r := &Repo{git: g, dir: dir, sem: make(chan struct{}, 1)}
-	out, err := r.run(ctx, nil, "rev-parse", "--is-inside-work-tree")
+	out, err := r.run(ctx, nil, defaultMaxOutput, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
 		var pe *process.Error
 		if errors.As(err, &pe) {
@@ -186,7 +186,7 @@ func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
 }
 
 func (r *Repo) revParsePath(ctx context.Context, flag string) (string, error) {
-	out, err := r.run(ctx, nil, "rev-parse", flag)
+	out, err := r.run(ctx, nil, defaultMaxOutput, "rev-parse", flag)
 	if err != nil {
 		return "", err
 	}
@@ -199,11 +199,16 @@ var ErrNotRepository = errors.New("not a git repository")
 // Run executes a read-only git subcommand in the workspace directory.
 // Callers must pass diff-family commands with --no-ext-diff and --no-textconv.
 func (r *Repo) Run(ctx context.Context, args ...string) ([]byte, error) {
+	return r.runMax(ctx, defaultMaxOutput, args...)
+}
+
+// runMax is Run with a smaller output limit (process.ErrOutputLimit).
+func (r *Repo) runMax(ctx context.Context, max int64, args ...string) ([]byte, error) {
 	names, err := r.filters(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return r.run(ctx, neutralizeFilters(names), args...)
+	return r.run(ctx, neutralizeFilters(names), max, args...)
 }
 
 // filters lists configured filter driver names. Attributes from the work tree,
@@ -212,7 +217,7 @@ func (r *Repo) Run(ctx context.Context, args ...string) ([]byte, error) {
 // overridden rather than relying on which attribute files are read. The list
 // is read again for every command because config can change at any time.
 func (r *Repo) filters(ctx context.Context) ([]string, error) {
-	out, err := r.run(ctx, nil, "config", "-z", "--name-only", "--get-regexp", `^filter\.`)
+	out, err := r.run(ctx, nil, defaultMaxOutput, "config", "-z", "--name-only", "--get-regexp", `^filter\.`)
 	if err != nil {
 		var pe *process.Error
 		// exit 1 = no matching keys
@@ -258,7 +263,7 @@ func neutralizeFilters(names []string) []string {
 }
 
 func (r *Repo) isPartialClone(ctx context.Context) (bool, error) {
-	out, err := r.run(ctx, nil, "config", "-z", "--get-regexp", `^(remote\..*\.promisor|extensions\.partialclone)$`)
+	out, err := r.run(ctx, nil, defaultMaxOutput, "config", "-z", "--get-regexp", `^(remote\..*\.promisor|extensions\.partialclone)$`)
 	if err != nil {
 		var pe *process.Error
 		if errors.As(err, &pe) && pe.ExitCode == 1 {
@@ -269,7 +274,7 @@ func (r *Repo) isPartialClone(ctx context.Context) (bool, error) {
 	return len(bytes.TrimSpace(out)) > 0, nil
 }
 
-func (r *Repo) run(ctx context.Context, extraEnv []string, args ...string) ([]byte, error) {
+func (r *Repo) run(ctx context.Context, extraEnv []string, max int64, args ...string) ([]byte, error) {
 	select {
 	case r.sem <- struct{}{}:
 		defer func() { <-r.sem }()
@@ -282,7 +287,7 @@ func (r *Repo) run(ctx context.Context, extraEnv []string, args ...string) ([]by
 		Dir:       r.dir,
 		Env:       append(append([]string{}, baseEnv...), extraEnv...),
 		Timeout:   defaultTimeout,
-		MaxOutput: defaultMaxOutput,
+		MaxOutput: max,
 	})
 	return res.Stdout, err
 }

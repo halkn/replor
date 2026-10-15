@@ -22,6 +22,8 @@ var keyHelp = [][2]string{
 	{"n / N", "next / previous search result"},
 	{"t", "table of contents"},
 	{"s", "switch a Markdown file between Preview and Source"},
+	{"d", "show the file's diffs (unstaged, staged), then back to Preview"},
+	{"c", "switch the left pane between Files and Changes"},
 	{"e", "show / hide the file tree"},
 	{"i", "show / hide files ignored by git"},
 	{"r", "reload the tree and the document"},
@@ -68,8 +70,7 @@ func (m *Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if !m.sideVisible() {
 			m.focus = paneViewer
 		}
-		v.savePos()
-		return m, m.load()
+		return m, m.relayout()
 	case "?":
 		m.overlay = overlayHelp
 	case "f":
@@ -94,6 +95,10 @@ func (m *Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 	case "s":
 		return m, m.toggleSource()
+	case "d":
+		return m, m.toggleDiff()
+	case "c":
+		return m, m.toggleLeft()
 	case ">":
 		m.selectLink(1)
 	case "<":
@@ -106,6 +111,9 @@ func (m *Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.reload()
 	default:
 		if m.focus == paneFiles && m.sideVisible() {
+			if m.left == leftChanges {
+				return m, m.changesKey(s)
+			}
 			return m, m.treeKey(s)
 		}
 		return m, m.viewerKey(s)

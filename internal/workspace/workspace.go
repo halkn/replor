@@ -174,3 +174,21 @@ func wrap(err error) error {
 	}
 	return err
 }
+
+// Readlink returns the target of a symbolic link; ok is false for any
+// other entry. The target is not followed or checked against the boundary.
+func (w *Workspace) Readlink(rel string) (target string, ok bool, err error) {
+	p, err := w.check(rel)
+	if err != nil {
+		return "", false, err
+	}
+	info, err := w.root.Lstat(p)
+	if err != nil {
+		return "", false, wrap(err)
+	}
+	if info.Mode()&fs.ModeSymlink == 0 {
+		return "", false, nil
+	}
+	target, err = w.root.Readlink(p)
+	return target, err == nil, wrap(err)
+}

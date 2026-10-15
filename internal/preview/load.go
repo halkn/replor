@@ -31,6 +31,7 @@ const (
 	KindImage
 	KindBinary
 	KindEmpty
+	KindDiff // produced by the caller from git output (DiffLines)
 )
 
 // Request asks for one file rendered at one width.
@@ -87,13 +88,13 @@ func Load(ctx context.Context, req Request) (Result, error) {
 			res.Transmit, res.KittyIDs = []string{tx}, []uint32{id}
 		}
 		return res, nil
-	case bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0:
+	case isBinary(data):
 		res.Kind = KindBinary
 		return res, nil
 	}
 
 	text := string(data)
-	if !isMarkdown(req.Path) {
+	if !IsMarkdown(req.Path) {
 		res.Kind = KindText
 		res.Rendered = SourceLines(req.Path, text, req.Width)
 		return res, nil
@@ -144,13 +145,17 @@ func Load(ctx context.Context, req Request) (Result, error) {
 	return res, nil
 }
 
-func isMarkdown(p string) bool {
+// IsMarkdown reports whether a path is rendered as Markdown.
+func IsMarkdown(p string) bool {
 	switch strings.ToLower(path.Ext(p)) {
 	case ".md", ".markdown", ".mdown", ".mkd":
 		return true
 	}
 	return false
 }
+
+// isBinary uses git's heuristic: a NUL byte in the first 8000 bytes.
+func isBinary(data []byte) bool { return bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 }
 
 func isImage(data []byte) bool {
 	return bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) ||
