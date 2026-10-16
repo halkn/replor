@@ -192,3 +192,21 @@ func (w *Workspace) Readlink(rel string) (target string, ok bool, err error) {
 	target, err = w.root.Readlink(p)
 	return target, err == nil, wrap(err)
 }
+
+// ReadDirN reads at most n entries of a directory (in directory order).
+func (w *Workspace) ReadDirN(rel string, n int) ([]fs.DirEntry, error) {
+	p, err := w.check(rel)
+	if err != nil {
+		return nil, err
+	}
+	f, err := w.root.Open(p)
+	if err != nil {
+		return nil, wrap(err)
+	}
+	defer f.Close()
+	entries, err := f.ReadDir(n)
+	if errors.Is(err, io.EOF) {
+		err = nil
+	}
+	return entries, wrap(err)
+}

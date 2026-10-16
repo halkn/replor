@@ -195,7 +195,7 @@ go.sum
 | Markdown AST | `github.com/yuin/goldmark`（GFM + Footnote） | 確定 |
 | ANSI Markdown表示 | `charm.land/glamour/v2`（ブロック単位で呼ぶ） | 確定 |
 | コードハイライト | `github.com/alecthomas/chroma/v2`（Glamour経由。Sourceでも同じものを使う） | 確定 |
-| ファイル監視 | `github.com/fsnotify/fsnotify` | 候補（P1-09で採否） |
+| ファイル監視 | 標準ライブラリの stat による定期確認（`internal/watch`） | 確定（D-14）。fsnotify は不採用 |
 | Mermaid | `github.com/zkrebbekx/go-mermaid`（SVG）＋ raster の内製版（CJKフォールバック） | **条件付き採用**（8.3） |
 | ターミナル画像 | 内製（Kitty Unicode placeholder／halfblocks は `x/mosaic`） | 確定。`go-termimg` は不採用 |
 | Git | `git` CLI / `os/exec`、最低 2.31 | 確定 |
@@ -395,9 +395,13 @@ Render new View
 - Workspace/Branch切り替え時に**generation ID**を更新する。加えて表示先ごとのrequest ID、対象パス、内容revision、表示モード・幅・テーマ・方言を要求と結果に対応付け、現在の要求と一致する結果だけ反映する。
 - 同一WorkspaceのA→B選択、同一ファイルの再編集、リサイズの前後で完了順が逆転しても、古い結果は現在の表示を上書きしない。不要な要求はキャンセルし、キャンセル不能でも結果を棄却する。
 - 同時実行は、描画が表示先ごとに 1 件（新しい要求が古い要求をキャンセル）、Git がリポジトリごとに直列、パス列挙が 1 件。同じ表示先への要求は `app.Latest` で最新のものへ集約し、古い結果は完了しても棄却する。プロセスのtimeoutに加え、CPU処理の入力サイズ（6.1の上限）も制限する。
-- ファイル変更とGit更新は必要に応じてDebounceする。
-- 監視イベントが取れない場合、明示的な再取得・画面再訪によって整合性を回復する。
-- Worktreeの`.git`がファイルになることに対応。worktree固有の管理パスと共通管理パスをGit CLIで解決し、Index・HEAD・参照の無効化対象を定める。変更通知は完全とはみなさず、通知欠落・監視上限でも`r`によって再取得できる。
+- 変更の検出は 1 秒ごとの stat 比較で行う（D-14）。対象は表示中のファイル、ルートと展開中のディレクトリ（エントリは `.git` を除き、1 回の走査で合計 5000 件まで）、Git の index・HEAD・MERGE_HEAD・packed-refs・現在のブランチの ref・`reftable/tables.list`。走査は前回の結果を受け取ってから次を予約するので重ならない。
+- 比較の基準は、読み込み・一覧・Git の読み取りの直前に取った stat とする。読み込みと次の走査の間に起きた変化も検出できる。mtime が 2 秒以内のエントリは、同じ mtime・同じサイズの書き換えがあり得るため、次の走査でも変化ありとみなす（Git の racily clean と同じ考え方）。
+- 変化があれば Git の状態を読み直す。表示中のファイルは、先頭ブロックの内容と選択中のリンクで位置を引き継いで読み直す。ディレクトリの一覧は、名前が増減したときだけ、展開中のサブツリーを残したまま読み直す。ファインダーの列挙結果は破棄する（開いている間は破棄せず、次に開いたときに再走査する）。表示中の Diff は新しいスナップショットで読み直す。
+- 監視による Git・表示の読み直しは、実行中のものをキャンセルせず、完了後に 1 回だけ実行する。書き込みが続いても読み取りが完了しないことを防ぐため。`r` は実行中のものを取り消して読み直す。
+- Worktreeの`.git`がファイルになることに対応。worktree 固有の管理ディレクトリ（index・HEAD）と共通管理ディレクトリ（参照）を `git rev-parse --path-format=absolute` で解決する。
+- 変更通知は完全とはみなさない。未展開のディレクトリ内の編集は検出しない。エントリの上限に達したときはヘッダーに「watch partial」と出す。どの場合も `r` で再取得できる。`--no-watch` で監視を止められる。
+- 表示中のファイルが消えたら、表示済みだった場合か Git が変更として報告している場合に「削除済み」と出し、Diff があれば `d` を案内する（4.3）。
 - 端末幅変更時、再レイアウト後も閲覧位置をできるだけ保持する。
 
 ### 9.2 キャッシュ
@@ -490,6 +494,7 @@ replor --no-watch
 | D-11 | 画像は Kitty placeholder / halfblocks / off、Sixel は対象外 | セル単位の差分描画の中で扱えるのは placeholder とテキストだけ（ADR-0001） |
 | D-12 | Mermaid は go-mermaid＋raster の内製版（CJK フォールバック） | upstream の PNG 化は日本語非対応（ADR-0001） |
 | D-13 | Diff は内製の unified ビューア（`git diff` の出力を無害化して色分け）。untracked は Workspace 境界内でファイルを読んで追加として組み立てる | 外部ツール（delta 等）への委譲は外部実行を抑止する Git 実行契約（7.3）と相容れない |
+| D-14 | ファイル監視は stat による定期確認（1 秒、表示中の対象と Git の管理ファイルだけ） | fsnotify は macOS の kqueue でファイルごとに fd を消費し、inotify は監視数の上限があり、ネットワーク系 FS（WSL の `/mnt/c` など）では通知が来ない。表示中の対象に絞れば stat は軽く、どの FS でも同じに動く |
 
 ## 14. 未決定事項と検証条件
 

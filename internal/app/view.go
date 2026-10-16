@@ -1,7 +1,9 @@
 package app
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"strings"
 
@@ -89,6 +91,10 @@ func (m *Model) header() string {
 	}
 	if v.pending {
 		parts = append(parts, bar.Render("  ⟳"))
+	}
+	// Last, so that a narrow header cuts it before the file and its tabs.
+	if m.watch.limited() {
+		parts = append(parts, onBar(dim).Render("  watch partial (r to reload)"))
 	}
 	return m.barLine(parts...)
 }
@@ -314,6 +320,15 @@ func (m *Model) viewerLines(h int) []string {
 		out = m.tocLines(w, h)
 	case v.target == nil:
 		out = []string{dim.Render("Select a file in the tree (Enter), or press ? for help.")}
+	case v.err != nil && m.deleted():
+		// DESIGN 4.3: say that the file is gone and where to see it.
+		msg := clean(v.target.Path) + " was deleted."
+		if to := m.git.movedTo(v.target.Path); to != "" {
+			msg = clean(v.target.Path) + " was moved to " + clean(to) + "."
+		} else if scopes, _ := m.git.scopesFor(v.target.Path); len(scopes) > 0 {
+			msg += " Press d to see the change."
+		}
+		out = []string{warn.Render(ansi.Truncate(msg, w, "…"))}
 	case v.err != nil:
 		out = []string{warn.Render(ansi.Truncate(clean("Cannot show "+v.target.Path+": "+v.err.Error()), w, "…"))}
 	case v.rendered() == nil && v.pending:
@@ -329,6 +344,17 @@ func (m *Model) viewerLines(h int) []string {
 		out = append(out, "")
 	}
 	return out[:h]
+}
+
+// deleted reports that the viewed file is missing because it was removed:
+// it was shown before, or git lists it as changed.
+func (m *Model) deleted() bool {
+	v := &m.viewer
+	if !errors.Is(v.err, fs.ErrNotExist) || v.target.Mode == ModeDiff {
+		return false
+	}
+	scopes, _ := m.git.scopesFor(v.target.Path)
+	return v.shown == v.target.Path || len(scopes) > 0 || m.git.movedTo(v.target.Path) != ""
 }
 
 func (m *Model) documentLines(w, h int) []string {
@@ -380,6 +406,8 @@ func (m *Model) finderLines(w, h int) []string {
 	switch {
 	case f.err != "":
 		status += " · " + warn.Render("error: "+clean(f.err))
+	case f.stale:
+		status += " · files changed; reopen to rescan"
 	case f.enumerating:
 		status += " · scanning…"
 	case f.reason != "":

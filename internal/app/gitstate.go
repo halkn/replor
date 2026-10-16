@@ -14,6 +14,7 @@ import (
 
 	"github.com/halkn/replor/internal/git"
 	"github.com/halkn/replor/internal/preview"
+	"github.com/halkn/replor/internal/watch"
 )
 
 type gitPhase int
@@ -31,6 +32,10 @@ type gitState struct {
 	reason string
 	repo   *git.Repo
 	snap   *git.Snapshot
+	// inFlight is set while a read runs; queued asks for one more read when
+	// it completes (refreshGit), so that a stream of changes cannot cancel
+	// every read before it finishes.
+	inFlight, queued bool
 
 	// The maps are keyed by NFC paths: macOS can return decomposed names
 	// from the file system while git prints composed ones.
@@ -90,6 +95,7 @@ type gitMsg struct {
 	ticket Ticket
 	repo   *git.Repo
 	snap   *git.Snapshot
+	seed   *watch.Snapshot // the metadata files as seen before the read
 	err    error
 }
 
@@ -97,7 +103,12 @@ type gitMsg struct {
 // on first use.
 func (m *Model) loadGit() tea.Cmd {
 	ticket, ctx := m.issue("git")
-	repo, root := m.git.repo, m.ws.Root
+	m.git.inFlight = true
+	repo, root, ws := m.git.repo, m.ws.Root, m.ws
+	branch := ""
+	if m.git.snap != nil {
+		branch = m.git.snap.Branch
+	}
 	return func() tea.Msg {
 		msg := gitMsg{ticket: ticket, repo: repo}
 		if repo == nil {
@@ -106,9 +117,23 @@ func (m *Model) loadGit() tea.Cmd {
 				return msg
 			}
 		}
+		msg.seed = watch.Scan(ws, watch.Set{Git: gitWatchFiles(msg.repo.GitDir, msg.repo.CommonDir, branch)}, 0)
 		msg.snap, msg.err = msg.repo.Snapshot(ctx)
 		return msg
 	}
+}
+
+// refreshGit is loadGit for watch events: a read already running is not
+// cancelled; one more is queued behind it.
+func (m *Model) refreshGit() tea.Cmd {
+	switch {
+	case m.git.repo == nil:
+		return nil
+	case m.git.inFlight:
+		m.git.queued = true
+		return nil
+	}
+	return m.loadGit()
 }
 
 func openRepo(ctx context.Context, root string) (*git.Repo, error) {
@@ -123,6 +148,16 @@ func (m *Model) applyGit(msg gitMsg) tea.Cmd {
 	if !m.latest.Accept(msg.ticket) {
 		return nil
 	}
+	m.git.inFlight = false
+	cmd := m.applyGitResult(msg)
+	if m.git.queued && m.git.repo != nil {
+		m.git.queued = false
+		cmd = tea.Batch(cmd, m.loadGit())
+	}
+	return cmd
+}
+
+func (m *Model) applyGitResult(msg gitMsg) tea.Cmd {
 	gs := &m.git
 	gs.repo = msg.repo
 	switch {
@@ -149,6 +184,7 @@ func (m *Model) applyGit(msg gitMsg) tea.Cmd {
 	}
 	oldIgnored := gs.ignored
 	gs.phase, gs.reason, gs.snap = gitReady, "", msg.snap
+	m.watch.seed(msg.seed)
 	gs.index(msg.snap)
 	if msg.snap.IgnoredErr == nil {
 		gs.ignored = map[string]bool{}
@@ -217,6 +253,21 @@ func sameSet(a, b map[string]bool) bool {
 		}
 	}
 	return true
+}
+
+// movedTo returns the new workspace path of a file renamed away from p, or
+// "" (also when it moved outside the workspace).
+func (gs *gitState) movedTo(p string) string {
+	if gs.snap == nil {
+		return ""
+	}
+	p = nfc(p)
+	for _, c := range gs.snap.Changes {
+		if c.OrigPath != "" && nfc(c.OrigPath) == p && c.Kind == git.ChangeRenamed {
+			return c.Path
+		}
+	}
+	return ""
 }
 
 // isIgnored reports whether rel or one of its parent directories is an

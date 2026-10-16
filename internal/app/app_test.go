@@ -39,7 +39,7 @@ func run(t *testing.T, m *Model, cmd tea.Cmd) {
 		return
 	}
 	switch msg.(type) {
-	case dirListedMsg, loadedMsg, finderBatchMsg, finderRankedMsg, gitMsg:
+	case dirListedMsg, loadedMsg, finderBatchMsg, finderRankedMsg, gitMsg, watchScannedMsg:
 		drive(t, m, msg)
 	}
 }
@@ -366,8 +366,8 @@ func TestKeysAfterLoadError(t *testing.T) {
 		t.Fatal(err)
 	}
 	drive(t, m, tea.WindowSizeMsg{Width: 70, Height: 20}) // reload fails
-	if m.viewer.err == nil || !strings.Contains(plainScreen(t, m), "Cannot show a.md") {
-		t.Fatal("expected a load error on screen")
+	if m.viewer.err == nil || !strings.Contains(plainScreen(t, m), "a.md was deleted") {
+		t.Fatal("expected the deletion on screen")
 	}
 	for _, k := range []string{"enter", "n", "N", "t", ">", "s", "/"} {
 		drive(t, m, key(k))

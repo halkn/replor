@@ -138,6 +138,10 @@ type Repo struct {
 	Toplevel string
 	// Prefix is the workspace directory relative to Toplevel ("" or "sub/dir/").
 	Prefix string
+	// GitDir holds this work tree's index and HEAD; CommonDir the refs
+	// shared by linked worktrees. Both are absolute and equal outside
+	// linked worktrees.
+	GitDir, CommonDir string
 
 	revision atomic.Uint64
 	// sem runs the commands of one repository one at a time (DESIGN 7.3):
@@ -173,6 +177,12 @@ func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
 	if r.Prefix, err = r.revParsePath(ctx, "--show-prefix"); err != nil {
 		return nil, err
 	}
+	if r.GitDir, err = r.revParsePath(ctx, "--path-format=absolute", "--git-dir"); err != nil {
+		return nil, err
+	}
+	if r.CommonDir, err = r.revParsePath(ctx, "--path-format=absolute", "--git-common-dir"); err != nil {
+		return nil, err
+	}
 	if g.Version.Less(LazyFetchVersion) {
 		partial, err := r.isPartialClone(ctx)
 		if err != nil {
@@ -185,8 +195,8 @@ func (g *Git) Open(ctx context.Context, dir string) (*Repo, error) {
 	return r, nil
 }
 
-func (r *Repo) revParsePath(ctx context.Context, flag string) (string, error) {
-	out, err := r.run(ctx, nil, defaultMaxOutput, "rev-parse", flag)
+func (r *Repo) revParsePath(ctx context.Context, flags ...string) (string, error) {
+	out, err := r.run(ctx, nil, defaultMaxOutput, append([]string{"rev-parse"}, flags...)...)
 	if err != nil {
 		return "", err
 	}

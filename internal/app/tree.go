@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/halkn/replor/internal/preview"
+	"github.com/halkn/replor/internal/watch"
 	"github.com/halkn/replor/internal/workspace"
 )
 
@@ -33,8 +34,11 @@ type tree struct {
 	cursor      int
 	top         int
 	rootLoading bool
-	rootErr     string
-	rootCut     bool
+	// defaulted is set after the first root listing, which may open the
+	// README; later listings (watch, `r`) must not.
+	defaulted bool
+	rootErr   string
+	rootCut   bool
 }
 
 type dirListedMsg struct {
@@ -42,20 +46,26 @@ type dirListedMsg struct {
 	dir       string
 	nodes     []workspace.Node
 	truncated bool
-	err       error
+	// deep re-lists the expanded directories below as well (`r`).
+	deep bool
+	seed *watch.Snapshot // the directory as seen before it was listed
+	err  error
 }
 
 // listDir lists one directory off the UI loop. Each directory is its own
 // display target, so expanding several directories does not cancel others.
-func (m *Model) listDir(dir string) tea.Cmd {
+func (m *Model) listDir(dir string) tea.Cmd { return m.listDirAt(dir, false) }
+
+func (m *Model) listDirAt(dir string, deep bool) tea.Cmd {
 	if dir == "." {
 		m.tree.rootLoading = true
 	}
 	ticket, _ := m.issue("tree:" + dir)
 	ws := m.ws
 	return func() tea.Msg {
+		seed := watch.Scan(ws, watch.Set{Dirs: []string{dir}}, watchMaxEntries)
 		nodes, cut, err := ws.ListDir(dir, maxDirEntries)
-		return dirListedMsg{ticket: ticket, dir: dir, nodes: nodes, truncated: cut, err: err}
+		return dirListedMsg{ticket: ticket, dir: dir, nodes: nodes, truncated: cut, deep: deep, seed: seed, err: err}
 	}
 }
 
@@ -63,6 +73,7 @@ func (m *Model) applyDir(msg dirListedMsg) tea.Cmd {
 	if !m.latest.Accept(msg.ticket) {
 		return nil
 	}
+	m.watch.seed(msg.seed)
 	viewing := ""
 	if m.viewer.target != nil {
 		viewing = m.viewer.target.Path
@@ -87,10 +98,15 @@ func (m *Model) applyDir(msg dirListedMsg) tea.Cmd {
 			return nil
 		}
 		m.tree.rootErr, m.tree.rootCut = "", msg.truncated
-		rows, reload := m.tree.restoreExpanded(children(0))
+		rows, reload := m.tree.restoreExpanded(children(0), m.tree.rows, msg.deep)
 		m.tree.rows = rows
 		m.tree.restoreCursor()
-		return tea.Batch(append(m.listDirs(reload), m.openDefault())...)
+		cmds := m.listDirs(reload, msg.deep)
+		if !m.tree.defaulted {
+			m.tree.defaulted = true
+			cmds = append(cmds, m.openDefault())
+		}
+		return tea.Batch(cmds...)
 	}
 	i := m.tree.indexOf(msg.dir)
 	if i < 0 || !m.tree.rows[i].expanded {
@@ -104,31 +120,51 @@ func (m *Model) applyDir(msg dirListedMsg) tea.Cmd {
 	}
 	r.err, r.truncated = "", msg.truncated
 	end := m.tree.subtreeEnd(i)
-	kids, reload := m.tree.restoreExpanded(children(r.depth + 1))
+	kids, reload := m.tree.restoreExpanded(children(r.depth+1), m.tree.rows[i+1:end], msg.deep)
 	m.tree.rows = append(append(append([]treeRow{}, m.tree.rows[:i+1]...), kids...), m.tree.rows[end:]...)
 	m.tree.restoreCursor()
-	return tea.Batch(m.listDirs(reload)...)
+	return tea.Batch(m.listDirs(reload, msg.deep)...)
 }
 
-func (m *Model) listDirs(dirs []string) []tea.Cmd {
+func (m *Model) listDirs(dirs []string, deep bool) []tea.Cmd {
 	cmds := make([]tea.Cmd, len(dirs))
 	for i, d := range dirs {
-		cmds[i] = m.listDir(d)
+		cmds[i] = m.listDirAt(d, deep)
 	}
 	return cmds
 }
 
-// restoreExpanded marks freshly listed directories that were expanded before
-// a re-listing (e.g. after `r`) and returns them to be listed again; nested
-// ones follow level by level as their parents arrive.
-func (t *tree) restoreExpanded(fresh []treeRow) (rows []treeRow, reload []string) {
-	for i := range fresh {
-		if t.expanded[fresh[i].node.Rel] && fresh[i].node.Kind == workspace.NodeDir {
-			fresh[i].expanded, fresh[i].loading = true, true
-			reload = append(reload, fresh[i].node.Rel)
+// restoreExpanded rebuilds a re-listed level. Directories expanded before
+// keep their previous subtree rows (old) so that nothing below them
+// disappears while waiting; those without one, or all of them when deep
+// (`r`), are returned to be listed again.
+func (t *tree) restoreExpanded(fresh, old []treeRow, deep bool) (rows []treeRow, reload []string) {
+	subtree := map[string][]treeRow{}
+	for i := 0; i < len(old); i++ {
+		if !old[i].expanded {
+			continue
+		}
+		j := i + 1
+		for j < len(old) && old[j].depth > old[i].depth {
+			j++
+		}
+		subtree[old[i].node.Rel] = old[i+1 : j]
+		i = j - 1
+	}
+	for _, f := range fresh {
+		if !t.expanded[f.node.Rel] || f.node.Kind != workspace.NodeDir {
+			rows = append(rows, f)
+			continue
+		}
+		kept, ok := subtree[f.node.Rel]
+		f.expanded, f.loading = true, deep || !ok
+		rows = append(rows, f)
+		rows = append(rows, kept...)
+		if deep || !ok {
+			reload = append(reload, f.node.Rel)
 		}
 	}
-	return fresh, reload
+	return rows, reload
 }
 
 func (t *tree) setCursor(i int) {
@@ -146,6 +182,11 @@ func (t *tree) restoreCursor() {
 		return
 	}
 	t.cursor = min(t.cursor, max(len(t.rows)-1, 0))
+}
+
+func (t *tree) isExpanded(rel string) bool {
+	i := t.indexOf(rel)
+	return i >= 0 && t.rows[i].expanded
 }
 
 func (t *tree) indexOf(rel string) int {
@@ -186,10 +227,10 @@ func (m *Model) toggleDir(i int) tea.Cmd {
 	return m.listDir(r.node.Rel)
 }
 
-// refreshTree re-lists the root; expanded directories are re-listed as
-// their parents arrive (restoreExpanded), so results cannot apply out of
+// refreshTree re-lists the root and, as their parents arrive, every
+// expanded directory (restoreExpanded), so results cannot apply out of
 // order.
-func (m *Model) refreshTree() tea.Cmd { return m.listDir(".") }
+func (m *Model) refreshTree() tea.Cmd { return m.listDirAt(".", true) }
 
 // openDefault opens README.md of the workspace root when nothing was
 // selected on the command line.
