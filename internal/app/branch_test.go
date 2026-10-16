@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/halkn/replor/internal/git"
 	"github.com/halkn/replor/internal/preview"
+	"github.com/halkn/replor/internal/process"
 	"github.com/halkn/replor/internal/workspace"
 )
 
@@ -219,5 +221,99 @@ func TestWatchFollowsBaseRef(t *testing.T) {
 	tick(t, m)
 	if entryIndex(m, sectionBranch, "added.md") >= 0 || entryIndex(m, sectionBranch, "docs/guide.md") < 0 {
 		t.Errorf("base move not followed: %+v", m.changes.entries)
+	}
+}
+
+// A ref the comparison resolved for the first time is watched from the read
+// on: a fetch right after it is not absorbed into the baseline.
+func TestWatchFollowsNewlyResolvedBaseRef(t *testing.T) {
+	dir := branchWorkspace(t)
+	m := startWatching(t, dir)
+	for _, root := range []string{dir, m.git.repo.GitDir} {
+		settleTree(t, root)
+	}
+	tick(t, m)
+	drive(t, m, key("b"))
+	gitIn(t, dir, "update-ref", "refs/remotes/origin/trunk", "feature")
+	tick(t, m)
+	if entryIndex(m, sectionBranch, "added.md") >= 0 {
+		t.Errorf("base move not followed: %+v", m.changes.entries)
+	}
+}
+
+// With --base, origin/HEAD does not matter and is not watched.
+func TestBaseRefsFollowTheBase(t *testing.T) {
+	m := startWith(t, branchWorkspace(t), Options{Base: "trunk"}, 120, 30)
+	drive(t, m, key("b"))
+	refs := m.baseRefs()
+	if slices.Contains(refs, git.DefaultBaseRef) || !slices.Contains(refs, "refs/heads/trunk") {
+		t.Errorf("refs = %v", refs)
+	}
+}
+
+// The first switch to Branch keeps the cursor on the file once the
+// comparison arrives.
+func TestFirstBranchSwitchKeepsCursor(t *testing.T) {
+	m := start(t, branchWorkspace(t), 120, 30)
+	drive(t, m, key("c"))
+	m.changes.setCursor(entryIndex(m, sectionUnstaged, "docs/guide.md"))
+	drive(t, m, key("b"))
+	if e := m.changes.entries[m.changes.cursor]; e.path() != "docs/guide.md" {
+		t.Errorf("cursor on %s", e.path())
+	}
+}
+
+// The Working snapshot is applied without waiting for the comparison.
+func TestSnapshotDoesNotWaitForComparison(t *testing.T) {
+	m := start(t, branchWorkspace(t), 120, 30)
+	drive(t, m, key("b"))
+	before := m.git.cmpRev
+	msg := m.loadGit()()
+	_, cmd := m.Update(msg)
+	if m.git.snap.Revision == before || m.git.cmpRev != before || cmd == nil {
+		t.Fatalf("snapshot %d, comparison %d (was %d)", m.git.snap.Revision, m.git.cmpRev, before)
+	}
+	run(t, m, cmd)
+	if m.git.cmpRev != m.git.snap.Revision {
+		t.Errorf("comparison %d for snapshot %d", m.git.cmpRev, m.git.snap.Revision)
+	}
+}
+
+// A file in the base that is an untracked nested repository now.
+func TestBranchUntrackedDirectoryInBase(t *testing.T) {
+	dir := branchWorkspace(t)
+	if err := os.Remove(filepath.Join(dir, "added.md")); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "commit", "-qam", "drop added.md")
+	gitIn(t, dir, "update-ref", "refs/remotes/origin/trunk", "HEAD~1")
+	gitIn(t, dir, "init", "-q", "added.md")
+	m := start(t, dir, 120, 30)
+	drive(t, m, key("b"))
+	openEntry(t, m, sectionBranch, "added.md")
+	if m.viewer.err != nil || !strings.Contains(strings.Join(m.viewer.rendered().Plain, "\n"), "nested repository") {
+		t.Errorf("err=%v", m.viewer.err)
+	}
+}
+
+// git's own error text, not its command line, explains a failure.
+func TestBranchErrorShowsGitMessage(t *testing.T) {
+	m := start(t, branchWorkspace(t), 120, 30)
+	drive(t, m, key("b"))
+	m.git.cmp, m.git.cmpErr = nil, &process.Error{Args: []string{"/usr/bin/git", "--no-pager", "merge-base"}, ExitCode: 128, Stderr: "fatal: broken\n"}
+	m.rebuildChanges()
+	if s := plainScreen(t, m); !strings.Contains(s, "fatal: broken") || strings.Contains(s, "--no-pager") {
+		t.Errorf("screen:\n%s", s)
+	}
+}
+
+// On a very low terminal the cursor row stays visible under the header.
+func TestBranchListOnLowTerminal(t *testing.T) {
+	m := start(t, branchWorkspace(t), 100, 4)
+	drive(t, m, key("b"))
+	drive(t, m, key("j"))
+	want := m.changes.entries[m.changes.cursor].path()
+	if s := plainScreen(t, m); !strings.Contains(s, want) {
+		t.Errorf("cursor entry %s not on screen:\n%s", want, s)
 	}
 }

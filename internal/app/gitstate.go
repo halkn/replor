@@ -49,11 +49,16 @@ type gitState struct {
 	conflicts map[string]bool
 
 	// branch is set once Branch Changes are asked for; from then on every
-	// read also compares with the base (cmp, or cmpErr when that failed).
-	// The comparison is not built before: it walks the history.
+	// snapshot is followed by a comparison with the base (cmp, or cmpErr
+	// when that failed), read separately so that the snapshot does not wait
+	// for it. cmpRev is the snapshot revision cmp was built from. The
+	// comparison is not built before: it walks the history.
 	branch bool
 	cmp    *git.Comparison
 	cmpErr error
+	cmpRev uint64
+	// As inFlight and queued, for the comparison.
+	cmpInFlight, cmpQueued bool
 }
 
 // index derives the per-path lookups from a snapshot and its comparison.
@@ -111,8 +116,6 @@ type gitMsg struct {
 	snap   *git.Snapshot
 	seed   *watch.Snapshot // the metadata files as seen before the read
 	err    error
-	cmp    *git.Comparison // when the read included the comparison
-	cmpErr error
 }
 
 // loadGit reads a snapshot off the UI loop, locating git and the repository
@@ -121,7 +124,7 @@ func (m *Model) loadGit() tea.Cmd {
 	ticket, ctx := m.issue("git")
 	m.git.inFlight = true
 	repo, root, ws := m.git.repo, m.ws.Root, m.ws
-	compare, base, branch, refs := m.git.branch, m.opts.Base, m.git.headBranch(), m.git.baseRefs()
+	branch, refs := m.git.headBranch(), m.baseRefs()
 	return func() tea.Msg {
 		msg := gitMsg{ticket: ticket, repo: repo}
 		if repo == nil {
@@ -132,9 +135,6 @@ func (m *Model) loadGit() tea.Cmd {
 		}
 		msg.seed = watch.Scan(ws, watch.Set{Git: gitWatchFiles(msg.repo.GitDir, msg.repo.CommonDir, branch, refs)}, 0)
 		msg.snap, msg.err = msg.repo.Snapshot(ctx)
-		if msg.err == nil && compare {
-			msg.cmp, msg.cmpErr = msg.repo.Compare(ctx, base, msg.snap)
-		}
 		return msg
 	}
 }
@@ -144,19 +144,6 @@ func (gs *gitState) headBranch() string {
 		return ""
 	}
 	return gs.snap.Branch
-}
-
-// baseRefs are the refs the comparison depends on, watched like HEAD: a
-// fetch or `git remote set-head` moves them.
-func (gs *gitState) baseRefs() []string {
-	if !gs.branch {
-		return nil
-	}
-	refs := []string{git.DefaultBaseRef}
-	if gs.cmp != nil && gs.cmp.BaseRef != "" {
-		refs = append(refs, gs.cmp.BaseRef)
-	}
-	return refs
 }
 
 // refreshGit is loadGit for watch events: a read already running is not
@@ -207,7 +194,7 @@ func (m *Model) applyGitResult(msg gitMsg) tea.Cmd {
 		// Marks from an older snapshot would contradict the error. The
 		// ignored set is kept: it only filters, and dropping it would flood
 		// the tree with build output on a transient failure.
-		gs.phase, gs.reason, gs.snap, gs.cmp, gs.cmpErr = gitFailed, msg.err.Error(), nil, nil, nil
+		gs.phase, gs.reason, gs.snap, gs.cmp, gs.cmpErr, gs.cmpRev = gitFailed, msg.err.Error(), nil, nil, nil, 0
 		gs.marks, gs.dirty, gs.counts, gs.scopes, gs.conflicts = nil, nil, nil, nil, nil
 		m.rebuildChanges()
 		// A shown diff belonged to the snapshot that is gone (DESIGN 7.2).
@@ -220,8 +207,6 @@ func (m *Model) applyGitResult(msg gitMsg) tea.Cmd {
 	}
 	oldIgnored := gs.ignored
 	gs.phase, gs.reason, gs.snap = gitReady, "", msg.snap
-	// A comparison from an earlier read belongs to another snapshot.
-	gs.cmp, gs.cmpErr = msg.cmp, msg.cmpErr
 	m.watch.seed(msg.seed)
 	gs.index(msg.snap, gs.cmp)
 	if msg.snap.IgnoredErr == nil {
@@ -232,10 +217,14 @@ func (m *Model) applyGitResult(msg gitMsg) tea.Cmd {
 	}
 	m.rebuildChanges()
 	var cmds []tea.Cmd
-	// A shown diff belongs to the previous snapshot.
-	if t := m.viewer.target; t != nil && t.Mode == ModeDiff {
+	// A shown diff belongs to the previous snapshot; a branch diff to the
+	// previous comparison, reloaded when the next one arrives.
+	if t := m.viewer.target; t != nil && t.Mode == ModeDiff && t.Scope != git.ScopeBranch {
 		m.viewer.savePos()
 		cmds = append(cmds, m.load())
+	}
+	if gs.branch {
+		cmds = append(cmds, m.refreshBranch())
 	}
 	// The tree and the finder filter with the ignored set; redo them when
 	// it changes.

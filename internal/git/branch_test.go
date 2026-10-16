@@ -3,11 +3,16 @@ package git
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/halkn/replor/internal/process"
 )
 
 // branchRepo has a base branch "trunk" published as origin/trunk (with
@@ -71,7 +76,7 @@ func TestCompareBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := r.Compare(ctx, "", s)
+	c, err := r.Compare(ctx, "", s, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +160,7 @@ func TestCompareExplicitBaseAndDetachedHead(t *testing.T) {
 	if !s.Detached {
 		t.Fatal("HEAD is not detached")
 	}
-	c, err := r.Compare(ctx, "trunk", s)
+	c, err := r.Compare(ctx, "trunk", s, nil)
 	if err != nil || c.Unavailable != "" {
 		t.Fatalf("%+v, %v", c, err)
 	}
@@ -163,7 +168,7 @@ func TestCompareExplicitBaseAndDetachedHead(t *testing.T) {
 		t.Errorf("%+v", c)
 	}
 	// An object name is not a ref: nothing to watch.
-	c, err = r.Compare(ctx, c.BaseOID, s)
+	c, err = r.Compare(ctx, c.BaseOID, s, nil)
 	if err != nil || c.Unavailable != "" || c.BaseRef != "" || len(c.Changes) != 1 {
 		t.Errorf("by OID: %+v, %v", c, err)
 	}
@@ -185,7 +190,7 @@ func TestCompareUnavailable(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		c, err := r.Compare(ctx, base, s)
+		c, err := r.Compare(ctx, base, s, nil)
 		if err != nil {
 			t.Fatalf("Compare: %v", err)
 		}
@@ -288,7 +293,7 @@ func TestCompareInSubdirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := r.Compare(ctx, "", s)
+	c, err := r.Compare(ctx, "", s, nil)
 	if err != nil || c.Unavailable != "" {
 		t.Fatalf("%+v, %v", c, err)
 	}
@@ -340,5 +345,153 @@ func TestParseBranchDiff(t *testing.T) {
 		if _, err := r.parseBranchDiff(bad); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
+	}
+}
+
+// git diff reports a conflicted path as an ordinary modification; the
+// snapshot's unmerged records mark it (DESIGN 7.1: not a two-way diff).
+func TestCompareMarksConflicts(t *testing.T) {
+	hermetic(t)
+	g := detect(t)
+	ctx := context.Background()
+	repo := branchRepo(t)
+	write(t, filepath.Join(repo, "keep.md"), "feature\n")
+	sh(t, repo, "commit", "-qam", "feature")
+	sh(t, repo, "switch", "-qc", "other", "trunk")
+	write(t, filepath.Join(repo, "keep.md"), "other\n")
+	sh(t, repo, "commit", "-qam", "other")
+	sh(t, repo, "switch", "-q", "feature")
+	cmd := exec.Command("git", "merge", "-q", "other")
+	cmd.Dir = repo
+	if err := cmd.Run(); err == nil {
+		t.Fatal("expected a conflict")
+	}
+	r, err := g.Open(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := r.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.Compare(ctx, "", s, nil)
+	if err != nil || c.Unavailable != "" {
+		t.Fatalf("%+v, %v", c, err)
+	}
+	if got := comparisonPaths(c)["keep.md"]; got.Kind != ChangeUnmerged || got.Index != 'U' || got.Worktree != 'U' {
+		t.Errorf("conflict: %+v", got)
+	}
+	if len(c.Changes) != len(comparisonPaths(c)) {
+		t.Errorf("a path is listed twice: %+v", c.Changes)
+	}
+}
+
+// A rename source that exists again untracked is compared with the base.
+func TestCompareUntrackedRenameSource(t *testing.T) {
+	hermetic(t)
+	g := detect(t)
+	ctx := context.Background()
+	repo := branchRepo(t)
+	sh(t, repo, "mv", "docs/old.md", "docs/moved.md")
+	sh(t, repo, "commit", "-qm", "move")
+	write(t, filepath.Join(repo, "docs", "old.md"), "new content\n")
+	r, err := g.Open(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := r.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := r.Compare(ctx, "", s, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := comparisonPaths(c)
+	if old := got["docs/old.md"]; old.Kind != ChangeUntrackedInBase || old.Worktree != 'M' {
+		t.Errorf("old.md: %+v", c.Changes)
+	}
+	if moved := got["docs/moved.md"]; moved.Kind != ChangeRenamed {
+		t.Errorf("moved.md: %+v", c.Changes)
+	}
+}
+
+// A FIFO at a tracked path must not be opened (it would block).
+func TestCompareDoesNotOpenFIFO(t *testing.T) {
+	hermetic(t)
+	g := detect(t)
+	ctx := context.Background()
+	repo := branchRepo(t)
+	if err := os.Remove(filepath.Join(repo, "keep.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Mkfifo(filepath.Join(repo, "keep.md"), 0o644); err != nil {
+		t.Skipf("mkfifo: %v", err)
+	}
+	r, err := g.Open(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := r.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if _, err := r.Compare(ctx, "", s, nil); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("Compare took %v", d)
+	}
+}
+
+// The merge base depends only on the base and HEAD; a later read reuses it.
+func TestCompareReusesMergeBase(t *testing.T) {
+	hermetic(t)
+	g := detect(t)
+	ctx := context.Background()
+	repo := branchRepo(t)
+	write(t, filepath.Join(repo, "keep.md"), "branch\n")
+	sh(t, repo, "commit", "-qam", "branch")
+	r, err := g.Open(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := r.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := r.Compare(ctx, "", s, nil)
+	if err != nil || first.MergeBase == "" || first.HeadOID != s.HeadOID {
+		t.Fatalf("%+v, %v", first, err)
+	}
+	// A merge base that git would not compute (HEAD itself) shows that it
+	// was reused.
+	prev := *first
+	prev.MergeBase = s.HeadOID
+	if c, _ := r.Compare(ctx, "", s, &prev); c.MergeBase != prev.MergeBase {
+		t.Errorf("not reused: %q", c.MergeBase)
+	}
+	prev.HeadOID = "other"
+	if c, _ := r.Compare(ctx, "", s, &prev); c.MergeBase != first.MergeBase {
+		t.Errorf("reused for another HEAD: %q", c.MergeBase)
+	}
+}
+
+func TestCheckBase(t *testing.T) {
+	for base, ok := range map[string]bool{"": true, "main": true, "origin/main~2": true, "-x": false, "--all": false} {
+		if err := CheckBase(base); (err == nil) != ok {
+			t.Errorf("CheckBase(%q) = %v", base, err)
+		}
+	}
+}
+
+func TestReason(t *testing.T) {
+	pe := &process.Error{Args: []string{"git", "--no-pager", "merge-base"}, ExitCode: 128, Stderr: "fatal: bad thing\nmore\n"}
+	if got := Reason(fmt.Errorf("wrapped: %w", pe)); got != "fatal: bad thing" {
+		t.Errorf("Reason = %q", got)
+	}
+	if got := Reason(errors.New("plain")); got != "plain" {
+		t.Errorf("Reason = %q", got)
 	}
 }

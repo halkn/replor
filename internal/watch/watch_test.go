@@ -174,3 +174,21 @@ func TestScanStopsReadingAtTheLimit(t *testing.T) {
 		t.Errorf("root read after the budget: %+v", s.dirs["."])
 	}
 }
+
+// A git file whose state at the read is unknown counts as changed once.
+func TestUnknownGitFilesReportOnce(t *testing.T) {
+	dir, ws := setup(t)
+	ref := filepath.Join(dir, "ref")
+	touch(t, ref, "1")
+	settle(t, ref)
+	set := Set{Git: []string{ref}}
+	last := Scan(ws, Set{}, 100)
+	last.Merge(Unknown([]string{ref}))
+	cur := Scan(ws, set, 100)
+	if !Compare(last, cur).Git {
+		t.Error("unknown file not reported")
+	}
+	if Compare(cur, Scan(ws, set, 100)).Git {
+		t.Error("reported again")
+	}
+}

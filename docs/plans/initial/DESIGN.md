@@ -293,7 +293,7 @@ Gitの状態は非同期に読み取り、完成したスナップショット�
 
 | 経路 | 契約 |
 |---|---|
-| Index・参照の書き換え | `--no-optional-locks`、`GIT_OPTIONAL_LOCKS=0`、`-c diff.autoRefreshIndex=false`（`git diff` は stat だけ変わったファイルがあると optional locks に関係なく index を書き戻すため）。working tree を変更するコマンドは呼ばない。stat だけの変更を内容の変更と区別するときは `git hash-object`（`-w` なし）で作業ファイルを読む |
+| Index・参照の書き換え | `--no-optional-locks`、`GIT_OPTIONAL_LOCKS=0`、`-c diff.autoRefreshIndex=false`（`git diff` は stat だけ変わったファイルがあると optional locks に関係なく index を書き戻すため。git 2.50.1 で確認）。working tree を変更するコマンドは呼ばない。stat だけの変更を内容の変更と区別するときは `git hash-object`（`-w` なし）で作業ファイルを読む |
 | fsmonitor hook | `-c core.fsmonitor=false` |
 | filter driver（clean/smudge/process） | 設定済みの driver 名を Git 呼び出しのたびに列挙し直し、`GIT_CONFIG_COUNT` 経由で clean/smudge/process を空、required を false にする（起動後に追加された driver も無効化するため、結果をキャッシュしない） |
 | 外部diff・textconv | diff 系の呼び出しには `--no-ext-diff --no-textconv` を必ず付ける |

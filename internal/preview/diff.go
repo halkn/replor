@@ -65,16 +65,9 @@ func UntrackedDiff(path string, data []byte) []byte {
 		fmt.Fprintf(&b, "Binary file %s (%d bytes)\n", path, len(data))
 		return b.Bytes()
 	}
-	text := string(data)
-	missingNL := !strings.HasSuffix(text, "\n")
-	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	fmt.Fprintf(&b, "--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n", path, len(lines))
-	for _, l := range lines {
-		b.WriteString("+" + l + "\n")
-	}
-	if missingNL {
-		b.WriteString("\\ No newline at end of file\n")
-	}
+	now := diffSide(data)
+	fmt.Fprintf(&b, "--- /dev/null\n+++ b/%s\n@@ -0,0 +%s @@\n", path, hunkRange(len(now.lines)))
+	now.write(&b, "+")
 	return b.Bytes()
 }
 

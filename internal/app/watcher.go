@@ -77,7 +77,7 @@ func (m *Model) watchSet() watch.Set {
 		}
 	}
 	if r := m.git.repo; r != nil {
-		set.Git = gitWatchFiles(r.GitDir, r.CommonDir, m.git.headBranch(), m.git.baseRefs())
+		set.Git = gitWatchFiles(r.GitDir, r.CommonDir, m.git.headBranch(), m.baseRefs())
 	}
 	return set
 }

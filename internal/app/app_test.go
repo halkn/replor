@@ -39,7 +39,7 @@ func run(t *testing.T, m *Model, cmd tea.Cmd) {
 		return
 	}
 	switch msg.(type) {
-	case dirListedMsg, loadedMsg, finderBatchMsg, finderRankedMsg, gitMsg, watchScannedMsg:
+	case dirListedMsg, loadedMsg, finderBatchMsg, finderRankedMsg, gitMsg, branchMsg, watchScannedMsg:
 		drive(t, m, msg)
 	}
 }

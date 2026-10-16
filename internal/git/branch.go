@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -23,6 +25,7 @@ type Comparison struct {
 	// the base was given as an object name.
 	Base, BaseRef      string
 	BaseOID, MergeBase string
+	HeadOID            string // the HEAD the merge base was found for
 	// Changes are sorted by repository path. Index is '.' (or '?' for
 	// untracked files) and Worktree holds the status letter.
 	Changes []FileChange
@@ -30,12 +33,22 @@ type Comparison struct {
 	Unavailable string
 }
 
+// CheckBase rejects a base that git would take for an option.
+func CheckBase(base string) error {
+	if strings.HasPrefix(base, "-") {
+		return fmt.Errorf("invalid base %q: must not start with \"-\"", base)
+	}
+	return nil
+}
+
 // Compare builds the Branch Changes of snapshot s against base, or against
 // the branch DefaultBaseRef points to when base is "". Conditions without a
 // single merge base are reported in Unavailable rather than compared with
-// some other commit; err is for commands that failed otherwise.
-func (r *Repo) Compare(ctx context.Context, base string, s *Snapshot) (*Comparison, error) {
-	c := &Comparison{Base: base}
+// some other commit; err is for commands that failed otherwise. The merge
+// base of prev, an earlier result, is reused when the base and HEAD are
+// the same: finding it can walk a long history.
+func (r *Repo) Compare(ctx context.Context, base string, s *Snapshot, prev *Comparison) (*Comparison, error) {
+	c := &Comparison{Base: base, HeadOID: s.HeadOID}
 	unavailable := func(format string, a ...any) (*Comparison, error) {
 		c.Unavailable = fmt.Sprintf(format, a...)
 		return c, nil
@@ -53,9 +66,8 @@ func (r *Repo) Compare(ctx context.Context, base string, s *Snapshot) (*Comparis
 		}
 		c.BaseRef = strings.TrimSpace(string(out))
 		c.Base = strings.TrimPrefix(c.BaseRef, "refs/remotes/")
-	case strings.HasPrefix(base, "-"):
-		// rev-parse would take it as an option.
-		return unavailable("invalid base %q", base)
+	case CheckBase(base) != nil:
+		return unavailable("%s", CheckBase(base))
 	default:
 		// Prints nothing for an object name; fails for an unknown name,
 		// which the lookup below reports.
@@ -77,27 +89,14 @@ func (r *Repo) Compare(ctx context.Context, base string, s *Snapshot) (*Comparis
 	}
 	c.BaseOID = strings.TrimSpace(string(out))
 
-	out, err = r.Run(ctx, "merge-base", "--all", c.BaseOID, s.HeadOID)
-	switch {
-	case missingObjects(err):
-		return unavailable("objects are missing: %s", firstLine(err))
-	case exitCode(err) == 1 && len(bytes.TrimSpace(out)) == 0:
-		shallow, err := r.Run(ctx, "rev-parse", "--is-shallow-repository")
+	if prev != nil && prev.MergeBase != "" && prev.BaseOID == c.BaseOID && prev.HeadOID == c.HeadOID {
+		c.MergeBase = prev.MergeBase
+	} else if reason, err := r.mergeBase(ctx, c); err != nil || reason != "" {
 		if err != nil {
 			return nil, err
 		}
-		if strings.TrimSpace(string(shallow)) == "true" {
-			return unavailable("shallow history does not reach a common ancestor of %s and HEAD (no fetch is made)", c.Base)
-		}
-		return unavailable("%s and HEAD have no common ancestor", c.Base)
-	case err != nil:
-		return nil, err
+		return unavailable("%s", reason)
 	}
-	bases := strings.Fields(string(out))
-	if len(bases) != 1 {
-		return unavailable("%s and HEAD have multiple merge bases", c.Base)
-	}
-	c.MergeBase = bases[0]
 
 	// The whole repository is compared, like status, so that a rename across
 	// the workspace boundary is paired and then cut by add.
@@ -105,7 +104,7 @@ func (r *Repo) Compare(ctx context.Context, base string, s *Snapshot) (*Comparis
 		"--ignore-submodules=dirty", "--raw", "--no-abbrev", "-z", c.MergeBase, "--")
 	if missingObjects(err) {
 		c.MergeBase = ""
-		return unavailable("objects are missing: %s", firstLine(err))
+		return unavailable("objects are missing: %s", Reason(err))
 	} else if err != nil {
 		return nil, err
 	}
@@ -113,31 +112,69 @@ func (r *Repo) Compare(ctx context.Context, base string, s *Snapshot) (*Comparis
 	if err != nil {
 		return nil, err
 	}
-	changes, err := r.dropStatOnly(ctx, entries)
+	changes, err := r.dropStatOnly(ctx, c.MergeBase, entries, s.Changes)
 	if err != nil {
 		return nil, err
 	}
-	c.Changes = mergeUntracked(changes, s.Changes)
+	c.Changes = mergeStatus(changes, s.Changes)
 	return c, nil
 }
 
-// mergeUntracked adds the untracked files of the snapshot. A path the merge
-// base has but the index does not shows as deleted in the diff; when it
-// exists untracked, the one entry compares it with the base (DESIGN 7.1).
-func mergeUntracked(changes, status []FileChange) []FileChange {
-	at := map[string]int{}
+// mergeBase sets c.MergeBase, or returns why there is no single one.
+func (r *Repo) mergeBase(ctx context.Context, c *Comparison) (reason string, err error) {
+	out, err := r.Run(ctx, "merge-base", "--all", c.BaseOID, c.HeadOID)
+	switch {
+	case missingObjects(err):
+		return "objects are missing: " + Reason(err), nil
+	case exitCode(err) == 1 && len(bytes.TrimSpace(out)) == 0:
+		shallow, err := r.Run(ctx, "rev-parse", "--is-shallow-repository")
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(string(shallow)) == "true" {
+			return fmt.Sprintf("shallow history does not reach a common ancestor of %s and HEAD (no fetch is made)", c.Base), nil
+		}
+		return fmt.Sprintf("%s and HEAD have no common ancestor", c.Base), nil
+	case err != nil:
+		return "", err
+	}
+	bases := strings.Fields(string(out))
+	if len(bases) != 1 {
+		return fmt.Sprintf("%s and HEAD have multiple merge bases", c.Base), nil
+	}
+	c.MergeBase = bases[0]
+	return "", nil
+}
+
+// mergeStatus adds what only the snapshot knows. git diff reports an
+// unmerged path as an ordinary modification; the snapshot marks it as a
+// conflict. Untracked files are added; a path the merge base has (deleted
+// or the source of a rename in the diff) that exists untracked now is
+// compared with its base content (DESIGN 7.1).
+func mergeStatus(changes, status []FileChange) []FileChange {
+	at, from := map[string]int{}, map[string]bool{}
 	for i, c := range changes {
 		at[c.RepoPath] = i
+		if c.Kind == ChangeRenamed {
+			from[c.RepoOrigPath] = true
+		}
 	}
 	for _, u := range status {
-		if u.Kind != ChangeUntracked {
-			continue
-		}
-		if i, ok := at[u.RepoPath]; ok && changes[i].Worktree == 'D' {
+		i, ok := at[u.RepoPath]
+		switch {
+		case u.Kind == ChangeUnmerged && ok:
+			changes[i].Index, changes[i].Worktree, changes[i].Kind = 'U', 'U', ChangeUnmerged
+		case u.Kind == ChangeUnmerged:
+			changes = append(changes, u)
+		case u.Kind != ChangeUntracked:
+		case ok && changes[i].Worktree == 'D':
 			changes[i].Index, changes[i].Worktree, changes[i].Kind = '?', 'M', ChangeUntrackedInBase
-			continue
+		case from[u.RepoPath]:
+			u.Worktree, u.Kind = 'M', ChangeUntrackedInBase
+			changes = append(changes, u)
+		default:
+			changes = append(changes, u)
 		}
-		changes = append(changes, u)
 	}
 	slices.SortStableFunc(changes, func(a, b FileChange) int { return strings.Compare(a.RepoPath, b.RepoPath) })
 	return changes
@@ -192,18 +229,50 @@ const hashBatch = 500
 // dropStatOnly removes modifications that are only a changed stat. With
 // diff.autoRefreshIndex off (see globalArgs), git reports a work tree file
 // whose stat differs from the index as modified without reading it (object
-// name all zeros); hashing the file tells whether its content still equals
-// the merge base's. hash-object without -w writes nothing. Files that cannot
-// be hashed stay listed.
-func (r *Repo) dropStatOnly(ctx context.Context, entries []rawEntry) ([]FileChange, error) {
-	var check []int
+// name all zeros). Where the snapshot (which compared contents) finds the
+// file equal to the index, the index entry is compared with the merge base
+// (`diff --cached`, no work tree); otherwise the file is hashed to tell
+// whether its content went back to the base's. hash-object without -w
+// writes nothing and only regular files are opened (a FIFO would block).
+// Files that cannot be checked stay listed.
+func (r *Repo) dropStatOnly(ctx context.Context, mergeBase string, entries []rawEntry, status []FileChange) ([]FileChange, error) {
+	dirty := map[string]bool{}
+	for _, c := range status {
+		if c.Worktree != '.' {
+			dirty[c.RepoPath] = true
+		}
+	}
+	var check, indexed []int
 	for i, e := range entries {
 		regular := e.srcMode == "100644" || e.srcMode == "100755"
-		if e.Worktree == 'M' && e.srcMode == e.dstMode && regular && strings.Trim(e.dstOID, "0") == "" && e.Path != "" {
+		if e.Worktree != 'M' || e.srcMode != e.dstMode || !regular || strings.Trim(e.dstOID, "0") != "" || e.Path == "" {
+			continue
+		}
+		if !dirty[e.RepoPath] {
+			indexed = append(indexed, i)
+		} else if info, err := os.Lstat(filepath.Join(r.Toplevel, filepath.FromSlash(e.RepoPath))); err == nil && info.Mode().IsRegular() {
 			check = append(check, i)
 		}
 	}
 	same := map[int]bool{}
+	if len(indexed) > 0 {
+		out, err := r.Run(ctx, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-relative",
+			"--ignore-submodules=dirty", "--cached", "--raw", "--no-abbrev", "-z", mergeBase, "--")
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err == nil {
+			changed := map[string]bool{}
+			if cached, err := r.parseBranchDiff(out); err == nil {
+				for _, e := range cached {
+					changed[e.RepoPath] = true
+				}
+				for _, i := range indexed {
+					same[i] = !changed[entries[i].RepoPath]
+				}
+			}
+		}
+	}
 	for start := 0; start < len(check); start += hashBatch {
 		batch := check[start:min(start+hashBatch, len(check))]
 		args := []string{"hash-object", "--"}
@@ -278,7 +347,9 @@ func missingObjects(err error) bool {
 	return false
 }
 
-func firstLine(err error) string {
+// Reason is the first line of what git printed for a failed command, or the
+// error itself; the command line is left out.
+func Reason(err error) string {
 	var pe *process.Error
 	if errors.As(err, &pe) {
 		line, _, _ := strings.Cut(strings.TrimSpace(pe.Stderr), "\n")

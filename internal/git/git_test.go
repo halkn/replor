@@ -185,7 +185,7 @@ func TestContractSuppressesExternalProgramsAndWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	cmp, err := r.Compare(ctx, "HEAD~1", s)
+	cmp, err := r.Compare(ctx, "HEAD~1", s, nil)
 	if err != nil || cmp.Unavailable != "" {
 		t.Fatalf("Compare: %+v, %v", cmp, err)
 	}

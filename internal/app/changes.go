@@ -44,7 +44,10 @@ type changesState struct {
 	entries  []changeEntry
 	cursor   int
 	selected string // key under the cursor, restored when the list is rebuilt
-	top      int
+	// want is a path to put the cursor on once the list has it (after a
+	// switch between Working and Branch, possibly before the list arrives).
+	want string
+	top  int
 }
 
 const (
@@ -106,9 +109,11 @@ func (gs *gitState) scopesFor(p string) (scopes []git.Scope, conflict bool) {
 
 func findChange(s *git.Snapshot, cmp *git.Comparison, scope git.Scope, p string) (git.FileChange, bool) {
 	p = nfc(p)
-	entries := buildChanges(s)
+	var entries []changeEntry
 	if scope == git.ScopeBranch {
 		entries = buildBranch(cmp)
+	} else {
+		entries = buildChanges(s)
 	}
 	for _, e := range entries {
 		if e.scope == scope && nfc(e.path()) == p && e.section != sectionConflicts {
@@ -126,6 +131,18 @@ func (m *Model) rebuildChanges() {
 		c.entries = buildBranch(m.git.cmp)
 	case m.git.snap != nil:
 		c.entries = buildChanges(m.git.snap)
+	}
+	if c.want != "" && len(c.entries) > 0 {
+		want := c.want
+		c.want = ""
+		for i, e := range c.entries {
+			if e.path() == want {
+				c.setCursor(i)
+				return
+			}
+		}
+		c.setCursor(0)
+		return
 	}
 	for i, e := range c.entries {
 		if e.key() == c.selected {
@@ -194,17 +211,11 @@ func (m *Model) toggleBranch() tea.Cmd {
 		c.branch = prev
 		return nil
 	}
-	if cur != "" {
-		for i, e := range c.entries {
-			if e.path() == cur {
-				c.setCursor(i)
-				break
-			}
-		}
-	}
+	c.want = cur
+	m.rebuildChanges()
 	if branch && !m.git.branch {
 		m.git.branch = true
-		cmd = tea.Batch(cmd, m.refreshGit())
+		cmd = tea.Batch(cmd, m.refreshBranch())
 	}
 	return cmd
 }
@@ -295,16 +306,20 @@ var errNoLongerChanged = errors.New("no longer changed")
 // loadDiff produces the diff of a target against the snapshot current when
 // requested; the result carries its revision so that a diff from an older
 // snapshot is not shown next to a newer list.
-func loadDiff(ctx context.Context, ws *workspace.Workspace, repo *git.Repo, snap *git.Snapshot, cmp *git.Comparison, t Target, width int) (preview.Result, uint64, error) {
+func loadDiff(ctx context.Context, ws *workspace.Workspace, repo *git.Repo, snap *git.Snapshot, cmp *git.Comparison, cmpRev uint64, t Target, width int) (preview.Result, uint64, error) {
 	if snap == nil || repo == nil {
 		return preview.Result{}, 0, errors.New("git status is not available")
 	}
-	if t.Scope == git.ScopeBranch && (cmp == nil || cmp.MergeBase == "") {
-		return preview.Result{}, snap.Revision, errors.New("the branch comparison is not available")
+	rev := snap.Revision
+	if t.Scope == git.ScopeBranch {
+		rev = cmpRev
+		if cmp == nil || cmp.MergeBase == "" {
+			return preview.Result{}, rev, errors.New("the branch comparison is not available")
+		}
 	}
 	c, ok := findChange(snap, cmp, t.Scope, t.Path)
 	if !ok {
-		return preview.Result{}, snap.Revision, fmt.Errorf("%s: %w (%v)", t.Path, errNoLongerChanged, t.Scope)
+		return preview.Result{}, rev, fmt.Errorf("%s: %w (%v)", t.Path, errNoLongerChanged, t.Scope)
 	}
 	var text []byte
 	var err error
@@ -320,10 +335,10 @@ func loadDiff(ctx context.Context, ws *workspace.Workspace, repo *git.Repo, snap
 		text, err = repo.Diff(ctx, t.Scope, c, preview.MaxSource)
 	}
 	if err != nil {
-		return preview.Result{}, snap.Revision, err
+		return preview.Result{}, rev, err
 	}
 	r := preview.DiffLines(string(text), width)
-	return preview.Result{Kind: preview.KindDiff, Size: len(text), Rendered: r}, snap.Revision, nil
+	return preview.Result{Kind: preview.KindDiff, Size: len(text), Rendered: r}, rev, nil
 }
 
 // untrackedDiff shows an untracked entry the way git would: a symbolic link
@@ -350,7 +365,11 @@ func untrackedDiff(ws *workspace.Workspace, p string) ([]byte, error) {
 
 // untrackedBaseDiff compares the merge base's content of a path with the
 // untracked file there now (a symbolic link by its target, as git stores it).
+// A directory there now is a nested repository, shown as untrackedDiff does.
 func untrackedBaseDiff(ctx context.Context, ws *workspace.Workspace, repo *git.Repo, cmp *git.Comparison, c git.FileChange) ([]byte, error) {
+	if info, err := ws.Stat(c.Path); err == nil && info.IsDir() {
+		return untrackedDiff(ws, c.Path)
+	}
 	base, err := repo.BaseContent(ctx, cmp, c, preview.MaxSource)
 	if err != nil {
 		return nil, err

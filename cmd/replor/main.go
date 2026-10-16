@@ -8,11 +8,11 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/halkn/replor/internal/app"
+	"github.com/halkn/replor/internal/git"
 	"github.com/halkn/replor/internal/preview"
 	"github.com/halkn/replor/internal/workspace"
 )
@@ -53,9 +53,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	// git would take it for an option.
-	if strings.HasPrefix(*base, "-") {
-		fmt.Fprintf(stderr, "replor: invalid -base value %q\n", *base)
+	if err := git.CheckBase(*base); err != nil {
+		fmt.Fprintln(stderr, "replor:", err)
 		return 2
 	}
 

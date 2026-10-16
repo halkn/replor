@@ -15,7 +15,7 @@ func TestRunArguments(t *testing.T) {
 	}{
 		{[]string{"-version"}, 0, "replor "},
 		{[]string{"-images", "sixel", "."}, 2, "unknown -images"},
-		{[]string{"-base", "--all", "."}, 2, "invalid -base"},
+		{[]string{"-base", "--all", "."}, 2, "invalid base"},
 		{[]string{"-nope"}, 2, "flag provided but not defined"},
 		{[]string{"a", "b"}, 2, "usage: replor"},
 		{[]string{filepath.Join(t.TempDir(), "missing")}, 1, "no such file"},

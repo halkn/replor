@@ -119,6 +119,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyFinderBatch(msg)
 	case gitMsg:
 		return m, m.applyGit(msg)
+	case branchMsg:
+		return m, m.applyBranch(msg)
 	case watchTickMsg:
 		return m, m.scan()
 	case watchScannedMsg:

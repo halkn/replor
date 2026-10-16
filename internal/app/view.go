@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/halkn/replor/internal/document"
+	"github.com/halkn/replor/internal/git"
 	"github.com/halkn/replor/internal/preview"
 	"github.com/halkn/replor/internal/workspace"
 )
@@ -148,7 +149,9 @@ func (m *Model) changesLines(h int) []string {
 	c := &m.changes
 	var head []string
 	if c.branch {
+		// At least one row is left for the list.
 		head = m.branchHead(w)
+		head = head[:min(len(head), max(h-1, 0))]
 	}
 	if len(c.entries) == 0 {
 		out := head
@@ -241,7 +244,7 @@ func (m *Model) branchHead(w int) []string {
 	case gs.phase == gitFailed:
 		return nil
 	case gs.cmpErr != nil:
-		return wrapped(warn, "branch: "+clean(gs.cmpErr.Error()), w)
+		return wrapped(warn, "branch: "+clean(git.Reason(gs.cmpErr)), w)
 	case gs.cmp == nil:
 		return []string{dim.Render(fit("Branch: comparing…", w))}
 	case gs.cmp.Unavailable != "":
