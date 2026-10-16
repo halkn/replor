@@ -317,3 +317,27 @@ func TestBranchListOnLowTerminal(t *testing.T) {
 		t.Errorf("cursor entry %s not on screen:\n%s", want, s)
 	}
 }
+
+// The footer names the Changes view and the keys that leave it, and an
+// empty Working list says what it lists.
+func TestChangesFooterAndEmptyWorking(t *testing.T) {
+	dir := branchWorkspace(t)
+	gitIn(t, dir, "stash", "-q", "--include-untracked")
+	m := start(t, dir, 120, 30)
+	drive(t, m, key("b"))
+	if f := plain(screen(t, m)[29]); !strings.Contains(f, "Changes: Branch") || !strings.Contains(f, "b Working") || !strings.Contains(f, "c Files") {
+		t.Errorf("Branch footer: %q", f)
+	}
+	drive(t, m, key("b"))
+	s := screen(t, m)
+	if f := plain(s[29]); !strings.Contains(f, "Changes: Working") || !strings.Contains(f, "b Branch") {
+		t.Errorf("Working footer: %q", f)
+	}
+	if !strings.Contains(plain(s[1]), "No uncommitted changes") {
+		t.Errorf("empty Working: %q", plain(s[1]))
+	}
+	drive(t, m, key("c"))
+	if f := plain(screen(t, m)[29]); strings.Contains(f, "Changes:") {
+		t.Errorf("Files footer: %q", f)
+	}
+}

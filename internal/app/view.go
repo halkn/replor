@@ -138,6 +138,13 @@ func (m *Model) footer() string {
 		s = fmt.Sprintf(" link %d/%d: %s → %s  (Enter to follow)", v.linkIdx+1, len(v.doc().Links), clean(l.Text), clean(l.Dest))
 	case len(v.matches) > 0:
 		s = fmt.Sprintf(" %q %d/%d  (n/N)", clean(v.query), v.matchIdx+1, len(v.matches))
+	case m.left == leftChanges && m.sideVisible():
+		// b switches within Changes; c is the way back to the tree.
+		view, other := "Working", "Branch"
+		if m.changes.branch {
+			view, other = other, view
+		}
+		s = " Changes: " + view + " · b " + other + " · c Files · Enter diff · d next diff · ? help · q quit"
 	default:
 		s = " Tab focus · Enter open · / search · t TOC · > link · ⌫ back · ? help · q quit"
 	}
@@ -158,7 +165,9 @@ func (m *Model) changesLines(h int) []string {
 		switch {
 		case m.git.phase == gitFailed:
 			out = append(out, dim.Render(fit("git: "+clean(m.git.reason), w)))
-		case !c.branch || m.git.cmp != nil && m.git.cmp.Unavailable == "":
+		case !c.branch:
+			out = append(out, dim.Render(fit("No uncommitted changes", w)))
+		case m.git.cmp != nil && m.git.cmp.Unavailable == "":
 			out = append(out, dim.Render(fit("No changes", w)))
 		}
 		for len(out) < h {
