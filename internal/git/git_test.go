@@ -107,6 +107,7 @@ func TestContractSuppressesExternalProgramsAndWrites(t *testing.T) {
 	write(t, filepath.Join(repo, "a.txt"), "base\n")
 	write(t, filepath.Join(repo, ".gitattributes"), "*.txt filter=evil diff=evil\n*.md filter=ev=il\n")
 	write(t, filepath.Join(repo, "b.md"), "md\n")
+	write(t, filepath.Join(repo, "same.md"), "same\n")
 	sh(t, repo, "add", ".")
 	sh(t, repo, "commit", "-qm", "init")
 	// A signed-looking commit so that log.showSignature would call gpg.program.
@@ -144,6 +145,9 @@ func TestContractSuppressesExternalProgramsAndWrites(t *testing.T) {
 	write(t, filepath.Join(repo, "a.txt"), "bas2\n")
 	write(t, filepath.Join(repo, "b.md"), "mx\n")
 	write(t, filepath.Join(repo, "c.go"), "package c\n")
+	// Rewritten unchanged: only its stat differs, which `git diff` would
+	// otherwise refresh into the index (diff.autoRefreshIndex).
+	write(t, filepath.Join(repo, "same.md"), "same\n")
 
 	// Hostile caller environment must not redirect anything.
 	t.Setenv("GIT_DIR", t.TempDir())
@@ -177,8 +181,24 @@ func TestContractSuppressesExternalProgramsAndWrites(t *testing.T) {
 			t.Errorf("%v: %v", c, err)
 		}
 	}
-	if _, err := r.Snapshot(ctx); err != nil {
-		t.Errorf("Snapshot: %v", err)
+	s, err := r.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	cmp, err := r.Compare(ctx, "HEAD~1", s, nil)
+	if err != nil || cmp.Unavailable != "" {
+		t.Fatalf("Compare: %+v, %v", cmp, err)
+	}
+	for _, c := range cmp.Changes {
+		if c.Kind == ChangeUntracked {
+			continue
+		}
+		if _, err := r.BranchDiff(ctx, cmp, c, 0); err != nil {
+			t.Errorf("BranchDiff %s: %v", c.Path, err)
+		}
+		if _, err := r.BaseContent(ctx, cmp, c, 0); err != nil {
+			t.Errorf("BaseContent %s: %v", c.Path, err)
+		}
 	}
 
 	entries, _ := os.ReadDir(markers)

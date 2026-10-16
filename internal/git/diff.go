@@ -16,10 +16,11 @@ const (
 	ScopeUnstaged  Scope = iota // index → work tree
 	ScopeStaged                 // HEAD (or the empty tree) → index
 	ScopeUntracked              // nothing → work tree file; no git diff
+	ScopeBranch                 // merge base → work tree (Comparison)
 )
 
 func (s Scope) String() string {
-	return [...]string{"unstaged", "staged", "untracked"}[s]
+	return [...]string{"unstaged", "staged", "untracked", "branch"}[s]
 }
 
 var (
@@ -42,11 +43,23 @@ var diffArgs = []string{
 	"--ignore-submodules=dirty", "--submodule=short",
 }
 
-// Diff returns the unified diff of one change, at most max bytes (0 = the
+// Diff returns the unified diff of one working change, at most max bytes (0 = the
 // default command limit). Both paths of a rename or copy are passed so that
 // git pairs them, but only paths inside the workspace: a source outside is
 // left out and the file then shows as added.
 func (r *Repo) Diff(ctx context.Context, scope Scope, c FileChange, max int64) ([]byte, error) {
+	switch scope {
+	case ScopeStaged:
+		// Before the first commit --cached compares with the empty tree.
+		return r.diff(ctx, []string{"--cached"}, c, max)
+	case ScopeUnstaged:
+		return r.diff(ctx, nil, c, max)
+	}
+	return nil, fmt.Errorf("%w: %v", ErrNoGitDiff, scope)
+}
+
+// diff runs diffArgs with what selects the comparison (rev) for one change.
+func (r *Repo) diff(ctx context.Context, rev []string, c FileChange, max int64) ([]byte, error) {
 	if c.Path == "" {
 		return nil, ErrOutsideWorkspace
 	}
@@ -56,15 +69,7 @@ func (r *Repo) Diff(ctx context.Context, scope Scope, c FileChange, max int64) (
 		// source is only considered with --find-copies-harder.
 		args = append(args, "-C", "--find-copies-harder")
 	}
-	switch scope {
-	case ScopeStaged:
-		// Before the first commit --cached compares with the empty tree.
-		args = append(args, "--cached")
-	case ScopeUnstaged:
-	default:
-		return nil, fmt.Errorf("%w: %v", ErrNoGitDiff, scope)
-	}
-	args = append(args, "--", r.cwdRel(c.RepoPath))
+	args = append(append(args, rev...), "--", r.cwdRel(c.RepoPath))
 	if c.OrigPath != "" {
 		args = append(args, r.cwdRel(c.RepoOrigPath))
 	}

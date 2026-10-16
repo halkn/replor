@@ -309,7 +309,7 @@ func TestDiffTargetBecomingConflictReturnsToFile(t *testing.T) {
 			m.git.snap.Changes[i].Kind = git.ChangeUnmerged
 		}
 	}
-	m.git.index(m.git.snap)
+	m.git.index(m.git.snap, m.git.cmp)
 	drive(t, m, key("d"))
 	if m.viewer.target.Mode == ModeDiff {
 		t.Errorf("d did not leave the diff of a conflicted file: %+v", m.viewer.target)

@@ -62,3 +62,24 @@ func TestDiffShowsCarriageReturn(t *testing.T) {
 		t.Errorf("removed line %q, added line %q", r.Plain[1], r.Plain[2])
 	}
 }
+
+func TestUntrackedBaseDiff(t *testing.T) {
+	d := string(UntrackedBaseDiff("dir/a.md", []byte("old\nsame\n"), []byte("same\nnew")))
+	for _, want := range []string{"diff --git a/dir/a.md b/dir/a.md\n", "--- a/dir/a.md\n+++ b/dir/a.md\n@@ -1,2 +1,2 @@\n-old\n-same\n+same\n+new\n\\ No newline at end of file\n"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("missing %q in:\n%s", want, d)
+		}
+	}
+	if d := string(UntrackedBaseDiff("a", nil, []byte("x\n"))); !strings.Contains(d, "@@ -0,0 +1 @@\n+x\n") {
+		t.Errorf("empty base:\n%s", d)
+	}
+	if d := string(UntrackedBaseDiff("a", []byte("x"), nil)); !strings.Contains(d, "@@ -1 +0,0 @@\n-x\n\\ No newline at end of file\n") {
+		t.Errorf("empty now:\n%s", d)
+	}
+	if d := string(UntrackedBaseDiff("a", []byte("x\n"), []byte("x\n"))); strings.Contains(d, "@@") || !strings.Contains(d, "same content") {
+		t.Errorf("identical:\n%s", d)
+	}
+	if d := string(UntrackedBaseDiff("a", []byte("x\n"), []byte("\x00"))); !strings.Contains(d, "Binary files a/a and b/a differ") {
+		t.Errorf("binary:\n%s", d)
+	}
+}

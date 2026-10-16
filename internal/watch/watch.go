@@ -189,3 +189,14 @@ func diffEntries(a, b dirSig) (names, contents bool) {
 	}
 	return names, contents
 }
+
+// Unknown records git files whose state when they were read is not known
+// (a ref found by the read itself): merged as a seed, they compare as
+// changed once, so that a change before the next scan is not missed.
+func Unknown(git []string) *Snapshot {
+	s := &Snapshot{files: map[string]sig{}, dirs: map[string]dirSig{}, git: map[string]sig{}}
+	for _, g := range git {
+		s.git[g] = sig{racy: true}
+	}
+	return s
+}

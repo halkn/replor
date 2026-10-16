@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/halkn/replor/internal/document"
+	"github.com/halkn/replor/internal/git"
 	"github.com/halkn/replor/internal/preview"
 	"github.com/halkn/replor/internal/workspace"
 )
@@ -137,6 +138,13 @@ func (m *Model) footer() string {
 		s = fmt.Sprintf(" link %d/%d: %s → %s  (Enter to follow)", v.linkIdx+1, len(v.doc().Links), clean(l.Text), clean(l.Dest))
 	case len(v.matches) > 0:
 		s = fmt.Sprintf(" %q %d/%d  (n/N)", clean(v.query), v.matchIdx+1, len(v.matches))
+	case m.left == leftChanges && m.sideVisible():
+		// b switches within Changes; c is the way back to the tree.
+		view, other := "Working", "Branch"
+		if m.changes.branch {
+			view, other = other, view
+		}
+		s = " Changes: " + view + " · b " + other + " · c Files · Enter diff · d next diff · ? help · q quit"
 	default:
 		s = " Tab focus · Enter open · / search · t TOC · > link · ⌫ back · ? help · q quit"
 	}
@@ -146,17 +154,28 @@ func (m *Model) footer() string {
 func (m *Model) changesLines(h int) []string {
 	w := m.sideWidth()
 	c := &m.changes
+	var head []string
+	if c.branch {
+		// At least one row is left for the list.
+		head = m.branchHead(w)
+		head = head[:min(len(head), max(h-1, 0))]
+	}
 	if len(c.entries) == 0 {
-		msg := "No changes"
-		if m.git.phase == gitFailed {
-			msg = "git: " + clean(m.git.reason)
+		out := head
+		switch {
+		case m.git.phase == gitFailed:
+			out = append(out, dim.Render(fit("git: "+clean(m.git.reason), w)))
+		case !c.branch:
+			out = append(out, dim.Render(fit("No uncommitted changes", w)))
+		case m.git.cmp != nil && m.git.cmp.Unavailable == "":
+			out = append(out, dim.Render(fit("No changes", w)))
 		}
-		out := []string{dim.Render(fit(msg, w))}
 		for len(out) < h {
 			out = append(out, strings.Repeat(" ", w))
 		}
-		return out
+		return out[:h]
 	}
+	h = max(h-len(head), 1)
 	// Section headings take a row each; keep the cursor in view.
 	type row struct {
 		text  string
@@ -186,7 +205,9 @@ func (m *Model) changesLines(h int) []string {
 	if cur >= c.top+h {
 		c.top = cur - h + 1
 	}
-	out := make([]string, 0, h)
+	out := make([]string, 0, h+len(head))
+	out = append(out, head...)
+	h += len(head)
 	for i := c.top; i < len(rows) && len(out) < h; i++ {
 		r := rows[i]
 		if r.entry < 0 {
@@ -220,6 +241,36 @@ func (m *Model) changesLines(h int) []string {
 	}
 	for len(out) < h {
 		out = append(out, strings.Repeat(" ", w))
+	}
+	return out
+}
+
+// branchHead describes the comparison above the Branch list: the base and
+// that its refs are local (DESIGN 7.1: no fetch), or why there is none.
+func (m *Model) branchHead(w int) []string {
+	gs := &m.git
+	switch {
+	case gs.phase == gitFailed:
+		return nil
+	case gs.cmpErr != nil:
+		return wrapped(warn, "branch: "+clean(git.Reason(gs.cmpErr)), w)
+	case gs.cmp == nil:
+		return []string{dim.Render(fit("Branch: comparing…", w))}
+	case gs.cmp.Unavailable != "":
+		return append([]string{accent.Render(fit("Branch", w))}, wrapped(warn, clean(gs.cmp.Unavailable), w)...)
+	}
+	return []string{
+		accent.Render(fit("vs "+clean(gs.cmp.Base), w)),
+		dim.Render(fit(fmt.Sprintf("base %.7s · not fetched", gs.cmp.MergeBase), w)),
+	}
+}
+
+// wrapped breaks text into rows of the width, at most 4.
+func wrapped(st lipgloss.Style, text string, w int) []string {
+	lines := strings.Split(ansi.Wrap(text, w, " "), "\n")
+	out := make([]string, 0, min(len(lines), 4))
+	for _, l := range lines[:min(len(lines), 4)] {
+		out = append(out, st.Render(fit(l, w)))
 	}
 	return out
 }

@@ -133,9 +133,9 @@ func (m *Model) request(blocks int) tea.Cmd {
 	ticket, ctx := m.issue("preview")
 	m.viewer.pending = true
 	if t.Mode == ModeDiff {
-		ws, repo, snap, target, width := m.ws, m.git.repo, m.git.snap, *t, m.viewerWidth()
+		ws, repo, snap, cmp, cmpRev, target, width := m.ws, m.git.repo, m.git.snap, m.git.cmp, m.git.cmpRev, *t, m.viewerWidth()
 		return func() tea.Msg {
-			res, rev, err := loadDiff(ctx, ws, repo, snap, target, width)
+			res, rev, err := loadDiff(ctx, ws, repo, snap, cmp, cmpRev, target, width)
 			return loadedMsg{ticket: ticket, target: target, res: res, err: err, revision: rev}
 		}
 	}
@@ -152,7 +152,7 @@ func (m *Model) applyLoad(msg loadedMsg) tea.Cmd {
 	if !m.latest.Accept(msg.ticket) {
 		return nil // superseded by a newer selection, resize or mode switch
 	}
-	if msg.target.Mode == ModeDiff && m.git.snap != nil && msg.revision != m.git.snap.Revision {
+	if msg.target.Mode == ModeDiff && m.git.snap != nil && msg.revision != m.diffRevision(msg.target) {
 		return m.load() // made from an older snapshot than the list shows
 	}
 	v := &m.viewer

@@ -93,7 +93,8 @@
 | P1-06 | 完了。ツリーの状態マーク・変更を含むディレクトリの印・ヘッダーのブランチと件数・Git なし/使用不可の表示 |
 | P1-07 | 完了。Changes ペイン（`c`）、Diff（`d`）、同一パスの staged / unstaged、初回コミット前、削除、rename（境界をまたぐ場合を含む）、conflict（作業ファイルを表示）、submodule、一覧と diff の revision 照合 |
 | P1-09 | 完了。stat による定期確認（D-14）、表示中ファイル・展開中ディレクトリ・Git の管理ファイル（worktree 対応）、閲覧位置とカーソルの保持、削除済みの表示、監視上限の表示、`--no-watch` |
-| P1-08, P1-10 | 未着手 |
+| P1-08 | 完了。Changes 内の `b` で Working と Branch を切替（Files からは Branch を開く）。基準は `--base` → `refs/remotes/origin/HEAD` の順で、最初に Branch を開いたときから取得する。純差分と untracked の統合（基準にあり現在 untracked のパスは 1 件で基準内容と比較）、打ち消し、detached HEAD、基準なし・merge-base なし／複数・shallow・オブジェクト不足の理由表示、基準 ref の監視。fetch はしない |
+| P1-10 | 未着手 |
 
 **P1完了条件（MVP Definition of Done）**
 

@@ -47,10 +47,22 @@ type gitState struct {
 	// conflicts holds unmerged paths. Both are derived once per snapshot.
 	scopes    map[string][]git.Scope
 	conflicts map[string]bool
+
+	// branch is set once Branch Changes are asked for; from then on every
+	// snapshot is followed by a comparison with the base (cmp, or cmpErr
+	// when that failed), read separately so that the snapshot does not wait
+	// for it. cmpRev is the snapshot revision cmp was built from. The
+	// comparison is not built before: it walks the history.
+	branch bool
+	cmp    *git.Comparison
+	cmpErr error
+	cmpRev uint64
+	// As inFlight and queued, for the comparison.
+	cmpInFlight, cmpQueued bool
 }
 
-// index derives the per-path lookups from a snapshot.
-func (gs *gitState) index(s *git.Snapshot) {
+// index derives the per-path lookups from a snapshot and its comparison.
+func (gs *gitState) index(s *git.Snapshot, cmp *git.Comparison) {
 	gs.marks, gs.dirty, gs.counts = map[string]byte{}, map[string]bool{}, map[byte]int{}
 	gs.scopes, gs.conflicts = map[string][]git.Scope{}, map[string]bool{}
 	markDirs := func(p string) {
@@ -77,13 +89,20 @@ func (gs *gitState) index(s *git.Snapshot) {
 			gs.scopes[p] = append(gs.scopes[p], e.scope)
 		}
 	}
+	// An untracked file already has its untracked diff.
+	for _, e := range buildBranch(cmp) {
+		if e.scope == git.ScopeBranch && e.change.Path != "" {
+			p := nfc(e.path())
+			gs.scopes[p] = append(gs.scopes[p], e.scope)
+		}
+	}
 	// Unstaged first: it is what the reader is editing.
 	for _, sc := range gs.scopes {
 		slices.SortFunc(sc, func(a, b git.Scope) int { return scopeRank[a] - scopeRank[b] })
 	}
 }
 
-var scopeRank = map[git.Scope]int{git.ScopeUnstaged: 0, git.ScopeStaged: 1, git.ScopeUntracked: 2}
+var scopeRank = map[git.Scope]int{git.ScopeUnstaged: 0, git.ScopeStaged: 1, git.ScopeUntracked: 2, git.ScopeBranch: 3}
 
 func nfc(s string) string { return norm.NFC.String(s) }
 
@@ -105,10 +124,7 @@ func (m *Model) loadGit() tea.Cmd {
 	ticket, ctx := m.issue("git")
 	m.git.inFlight = true
 	repo, root, ws := m.git.repo, m.ws.Root, m.ws
-	branch := ""
-	if m.git.snap != nil {
-		branch = m.git.snap.Branch
-	}
+	branch, refs := m.git.headBranch(), m.baseRefs()
 	return func() tea.Msg {
 		msg := gitMsg{ticket: ticket, repo: repo}
 		if repo == nil {
@@ -117,10 +133,17 @@ func (m *Model) loadGit() tea.Cmd {
 				return msg
 			}
 		}
-		msg.seed = watch.Scan(ws, watch.Set{Git: gitWatchFiles(msg.repo.GitDir, msg.repo.CommonDir, branch)}, 0)
+		msg.seed = watch.Scan(ws, watch.Set{Git: gitWatchFiles(msg.repo.GitDir, msg.repo.CommonDir, branch, refs)}, 0)
 		msg.snap, msg.err = msg.repo.Snapshot(ctx)
 		return msg
 	}
+}
+
+func (gs *gitState) headBranch() string {
+	if gs.snap == nil {
+		return ""
+	}
+	return gs.snap.Branch
 }
 
 // refreshGit is loadGit for watch events: a read already running is not
@@ -171,7 +194,7 @@ func (m *Model) applyGitResult(msg gitMsg) tea.Cmd {
 		// Marks from an older snapshot would contradict the error. The
 		// ignored set is kept: it only filters, and dropping it would flood
 		// the tree with build output on a transient failure.
-		gs.phase, gs.reason, gs.snap = gitFailed, msg.err.Error(), nil
+		gs.phase, gs.reason, gs.snap, gs.cmp, gs.cmpErr, gs.cmpRev = gitFailed, msg.err.Error(), nil, nil, nil, 0
 		gs.marks, gs.dirty, gs.counts, gs.scopes, gs.conflicts = nil, nil, nil, nil, nil
 		m.rebuildChanges()
 		// A shown diff belonged to the snapshot that is gone (DESIGN 7.2).
@@ -185,7 +208,7 @@ func (m *Model) applyGitResult(msg gitMsg) tea.Cmd {
 	oldIgnored := gs.ignored
 	gs.phase, gs.reason, gs.snap = gitReady, "", msg.snap
 	m.watch.seed(msg.seed)
-	gs.index(msg.snap)
+	gs.index(msg.snap, gs.cmp)
 	if msg.snap.IgnoredErr == nil {
 		gs.ignored = map[string]bool{}
 		for _, p := range msg.snap.Ignored {
@@ -194,10 +217,14 @@ func (m *Model) applyGitResult(msg gitMsg) tea.Cmd {
 	}
 	m.rebuildChanges()
 	var cmds []tea.Cmd
-	// A shown diff belongs to the previous snapshot.
-	if t := m.viewer.target; t != nil && t.Mode == ModeDiff {
+	// A shown diff belongs to the previous snapshot; a branch diff to the
+	// previous comparison, reloaded when the next one arrives.
+	if t := m.viewer.target; t != nil && t.Mode == ModeDiff && t.Scope != git.ScopeBranch {
 		m.viewer.savePos()
 		cmds = append(cmds, m.load())
+	}
+	if gs.branch {
+		cmds = append(cmds, m.refreshBranch())
 	}
 	// The tree and the finder filter with the ignored set; redo them when
 	// it changes.

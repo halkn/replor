@@ -40,6 +40,9 @@ type Options struct {
 	Images preview.ImageMode
 	// Watch reloads what is on screen when files or git state change.
 	Watch bool
+	// Base is the branch Branch Changes compare with; "" looks it up
+	// (git.DefaultBaseRef).
+	Base string
 }
 
 type pane int
@@ -116,6 +119,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyFinderBatch(msg)
 	case gitMsg:
 		return m, m.applyGit(msg)
+	case branchMsg:
+		return m, m.applyBranch(msg)
 	case watchTickMsg:
 		return m, m.scan()
 	case watchScannedMsg:

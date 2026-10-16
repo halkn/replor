@@ -22,8 +22,9 @@ var keyHelp = [][2]string{
 	{"n / N", "next / previous search result"},
 	{"t", "table of contents"},
 	{"s", "switch a Markdown file between Preview and Source"},
-	{"d", "show the file's diffs (unstaged, staged), then back to Preview"},
+	{"d", "show the file's diffs (unstaged, staged, branch), then back to Preview"},
 	{"c", "switch the left pane between Files and Changes"},
+	{"b", "switch Changes between Working and Branch (since the base branch)"},
 	{"e", "show / hide the file tree"},
 	{"i", "show / hide files ignored by git"},
 	{"r", "reload the tree and the document"},
@@ -99,6 +100,8 @@ func (m *Model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, m.toggleDiff()
 	case "c":
 		return m, m.toggleLeft()
+	case "b":
+		return m, m.toggleBranch()
 	case ">":
 		m.selectLink(1)
 	case "<":
