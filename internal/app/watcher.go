@@ -77,19 +77,16 @@ func (m *Model) watchSet() watch.Set {
 		}
 	}
 	if r := m.git.repo; r != nil {
-		branch := ""
-		if m.git.snap != nil {
-			branch = m.git.snap.Branch
-		}
-		set.Git = gitWatchFiles(r.GitDir, r.CommonDir, branch)
+		set.Git = gitWatchFiles(r.GitDir, r.CommonDir, m.git.headBranch(), m.git.baseRefs())
 	}
 	return set
 }
 
 // gitWatchFiles are the metadata files a commit, checkout, reset or
-// `git add` touches. Refs live either as files (refs/heads) or, with the
-// reftable backend, in tables listed by reftable/tables.list.
-func gitWatchFiles(gitDir, commonDir, branch string) []string {
+// `git add` touches, and the files of refs (full names). Refs live either as
+// files or, with the reftable backend, in tables listed by
+// reftable/tables.list.
+func gitWatchFiles(gitDir, commonDir, branch string, refs []string) []string {
 	files := []string{
 		filepath.Join(gitDir, "index"),
 		filepath.Join(gitDir, "HEAD"),
@@ -99,6 +96,13 @@ func gitWatchFiles(gitDir, commonDir, branch string) []string {
 	}
 	if branch != "" {
 		files = append(files, filepath.Join(commonDir, "refs", "heads", filepath.FromSlash(branch)))
+	}
+	for _, ref := range refs {
+		files = append(files, filepath.Join(commonDir, filepath.FromSlash(ref)))
+	}
+	if len(refs) > 0 {
+		// A deepening fetch extends the history a merge base is searched in.
+		files = append(files, filepath.Join(commonDir, "shallow"))
 	}
 	return files
 }

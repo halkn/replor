@@ -47,10 +47,17 @@ type gitState struct {
 	// conflicts holds unmerged paths. Both are derived once per snapshot.
 	scopes    map[string][]git.Scope
 	conflicts map[string]bool
+
+	// branch is set once Branch Changes are asked for; from then on every
+	// read also compares with the base (cmp, or cmpErr when that failed).
+	// The comparison is not built before: it walks the history.
+	branch bool
+	cmp    *git.Comparison
+	cmpErr error
 }
 
-// index derives the per-path lookups from a snapshot.
-func (gs *gitState) index(s *git.Snapshot) {
+// index derives the per-path lookups from a snapshot and its comparison.
+func (gs *gitState) index(s *git.Snapshot, cmp *git.Comparison) {
 	gs.marks, gs.dirty, gs.counts = map[string]byte{}, map[string]bool{}, map[byte]int{}
 	gs.scopes, gs.conflicts = map[string][]git.Scope{}, map[string]bool{}
 	markDirs := func(p string) {
@@ -77,13 +84,20 @@ func (gs *gitState) index(s *git.Snapshot) {
 			gs.scopes[p] = append(gs.scopes[p], e.scope)
 		}
 	}
+	// An untracked file already has its untracked diff.
+	for _, e := range buildBranch(cmp) {
+		if e.scope == git.ScopeBranch && e.change.Path != "" {
+			p := nfc(e.path())
+			gs.scopes[p] = append(gs.scopes[p], e.scope)
+		}
+	}
 	// Unstaged first: it is what the reader is editing.
 	for _, sc := range gs.scopes {
 		slices.SortFunc(sc, func(a, b git.Scope) int { return scopeRank[a] - scopeRank[b] })
 	}
 }
 
-var scopeRank = map[git.Scope]int{git.ScopeUnstaged: 0, git.ScopeStaged: 1, git.ScopeUntracked: 2}
+var scopeRank = map[git.Scope]int{git.ScopeUnstaged: 0, git.ScopeStaged: 1, git.ScopeUntracked: 2, git.ScopeBranch: 3}
 
 func nfc(s string) string { return norm.NFC.String(s) }
 
@@ -97,6 +111,8 @@ type gitMsg struct {
 	snap   *git.Snapshot
 	seed   *watch.Snapshot // the metadata files as seen before the read
 	err    error
+	cmp    *git.Comparison // when the read included the comparison
+	cmpErr error
 }
 
 // loadGit reads a snapshot off the UI loop, locating git and the repository
@@ -105,10 +121,7 @@ func (m *Model) loadGit() tea.Cmd {
 	ticket, ctx := m.issue("git")
 	m.git.inFlight = true
 	repo, root, ws := m.git.repo, m.ws.Root, m.ws
-	branch := ""
-	if m.git.snap != nil {
-		branch = m.git.snap.Branch
-	}
+	compare, base, branch, refs := m.git.branch, m.opts.Base, m.git.headBranch(), m.git.baseRefs()
 	return func() tea.Msg {
 		msg := gitMsg{ticket: ticket, repo: repo}
 		if repo == nil {
@@ -117,10 +130,33 @@ func (m *Model) loadGit() tea.Cmd {
 				return msg
 			}
 		}
-		msg.seed = watch.Scan(ws, watch.Set{Git: gitWatchFiles(msg.repo.GitDir, msg.repo.CommonDir, branch)}, 0)
+		msg.seed = watch.Scan(ws, watch.Set{Git: gitWatchFiles(msg.repo.GitDir, msg.repo.CommonDir, branch, refs)}, 0)
 		msg.snap, msg.err = msg.repo.Snapshot(ctx)
+		if msg.err == nil && compare {
+			msg.cmp, msg.cmpErr = msg.repo.Compare(ctx, base, msg.snap)
+		}
 		return msg
 	}
+}
+
+func (gs *gitState) headBranch() string {
+	if gs.snap == nil {
+		return ""
+	}
+	return gs.snap.Branch
+}
+
+// baseRefs are the refs the comparison depends on, watched like HEAD: a
+// fetch or `git remote set-head` moves them.
+func (gs *gitState) baseRefs() []string {
+	if !gs.branch {
+		return nil
+	}
+	refs := []string{git.DefaultBaseRef}
+	if gs.cmp != nil && gs.cmp.BaseRef != "" {
+		refs = append(refs, gs.cmp.BaseRef)
+	}
+	return refs
 }
 
 // refreshGit is loadGit for watch events: a read already running is not
@@ -171,7 +207,7 @@ func (m *Model) applyGitResult(msg gitMsg) tea.Cmd {
 		// Marks from an older snapshot would contradict the error. The
 		// ignored set is kept: it only filters, and dropping it would flood
 		// the tree with build output on a transient failure.
-		gs.phase, gs.reason, gs.snap = gitFailed, msg.err.Error(), nil
+		gs.phase, gs.reason, gs.snap, gs.cmp, gs.cmpErr = gitFailed, msg.err.Error(), nil, nil, nil
 		gs.marks, gs.dirty, gs.counts, gs.scopes, gs.conflicts = nil, nil, nil, nil, nil
 		m.rebuildChanges()
 		// A shown diff belonged to the snapshot that is gone (DESIGN 7.2).
@@ -184,8 +220,10 @@ func (m *Model) applyGitResult(msg gitMsg) tea.Cmd {
 	}
 	oldIgnored := gs.ignored
 	gs.phase, gs.reason, gs.snap = gitReady, "", msg.snap
+	// A comparison from an earlier read belongs to another snapshot.
+	gs.cmp, gs.cmpErr = msg.cmp, msg.cmpErr
 	m.watch.seed(msg.seed)
-	gs.index(msg.snap)
+	gs.index(msg.snap, gs.cmp)
 	if msg.snap.IgnoredErr == nil {
 		gs.ignored = map[string]bool{}
 		for _, p := range msg.snap.Ignored {

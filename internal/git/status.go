@@ -15,6 +15,9 @@ const (
 	ChangeCopied
 	ChangeUnmerged
 	ChangeUntracked
+	// ChangeUntrackedInBase is a Branch change only: a path of the merge
+	// base that is untracked now, compared with the base content.
+	ChangeUntrackedInBase
 )
 
 // FileChange is one entry of the working changes. Path and OrigPath are
@@ -149,9 +152,16 @@ func (r *Repo) parseStatus(out []byte) (*Snapshot, error) {
 	return s, nil
 }
 
-// add maps the paths into the workspace and keeps the change if either side
-// is inside it.
+// add keeps the change if either side is inside the workspace.
 func (r *Repo) add(s *Snapshot, c FileChange) {
+	if c, ok := r.inWorkspace(c); ok {
+		s.Changes = append(s.Changes, c)
+	}
+}
+
+// inWorkspace maps the paths into the workspace; ok is false when neither
+// side is inside it.
+func (r *Repo) inWorkspace(c FileChange) (_ FileChange, ok bool) {
 	var in, origIn bool
 	c.Path, in = r.FromGit(c.RepoPath)
 	if !in {
@@ -163,9 +173,7 @@ func (r *Repo) add(s *Snapshot, c FileChange) {
 			c.OrigPath = ""
 		}
 	}
-	if in || origIn {
-		s.Changes = append(s.Changes, c)
-	}
+	return c, in || origIn
 }
 
 // parseIgnored returns the ignored entries and the HEAD the read saw. A

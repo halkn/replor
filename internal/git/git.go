@@ -115,12 +115,16 @@ var baseEnv = []string{
 //   - core.fsmonitor=false: a hook path in config is executed by status/diff
 //   - log.showSignature=false: would run gpg.program from `git log`
 //   - core.quotePath=false: keep raw bytes; callers use -z for machine output
+//   - diff.autoRefreshIndex=false: `git diff` writes refreshed stat data to
+//     the index when a file's stat changed but its content did not, and
+//     does so regardless of --no-optional-locks
 func (g *Git) globalArgs() []string {
 	args := []string{
 		"--no-pager",
 		"--no-optional-locks",
 		"--literal-pathspecs",
 		"-c", "core.fsmonitor=false",
+		"-c", "diff.autoRefreshIndex=false",
 		"-c", "log.showSignature=false",
 		"-c", "core.quotePath=false",
 		"-c", "color.ui=false",

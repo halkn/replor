@@ -146,17 +146,24 @@ func (m *Model) footer() string {
 func (m *Model) changesLines(h int) []string {
 	w := m.sideWidth()
 	c := &m.changes
+	var head []string
+	if c.branch {
+		head = m.branchHead(w)
+	}
 	if len(c.entries) == 0 {
-		msg := "No changes"
-		if m.git.phase == gitFailed {
-			msg = "git: " + clean(m.git.reason)
+		out := head
+		switch {
+		case m.git.phase == gitFailed:
+			out = append(out, dim.Render(fit("git: "+clean(m.git.reason), w)))
+		case !c.branch || m.git.cmp != nil && m.git.cmp.Unavailable == "":
+			out = append(out, dim.Render(fit("No changes", w)))
 		}
-		out := []string{dim.Render(fit(msg, w))}
 		for len(out) < h {
 			out = append(out, strings.Repeat(" ", w))
 		}
-		return out
+		return out[:h]
 	}
+	h = max(h-len(head), 1)
 	// Section headings take a row each; keep the cursor in view.
 	type row struct {
 		text  string
@@ -186,7 +193,9 @@ func (m *Model) changesLines(h int) []string {
 	if cur >= c.top+h {
 		c.top = cur - h + 1
 	}
-	out := make([]string, 0, h)
+	out := make([]string, 0, h+len(head))
+	out = append(out, head...)
+	h += len(head)
 	for i := c.top; i < len(rows) && len(out) < h; i++ {
 		r := rows[i]
 		if r.entry < 0 {
@@ -220,6 +229,36 @@ func (m *Model) changesLines(h int) []string {
 	}
 	for len(out) < h {
 		out = append(out, strings.Repeat(" ", w))
+	}
+	return out
+}
+
+// branchHead describes the comparison above the Branch list: the base and
+// that its refs are local (DESIGN 7.1: no fetch), or why there is none.
+func (m *Model) branchHead(w int) []string {
+	gs := &m.git
+	switch {
+	case gs.phase == gitFailed:
+		return nil
+	case gs.cmpErr != nil:
+		return wrapped(warn, "branch: "+clean(gs.cmpErr.Error()), w)
+	case gs.cmp == nil:
+		return []string{dim.Render(fit("Branch: comparing…", w))}
+	case gs.cmp.Unavailable != "":
+		return append([]string{accent.Render(fit("Branch", w))}, wrapped(warn, clean(gs.cmp.Unavailable), w)...)
+	}
+	return []string{
+		accent.Render(fit("vs "+clean(gs.cmp.Base), w)),
+		dim.Render(fit(fmt.Sprintf("base %.7s · not fetched", gs.cmp.MergeBase), w)),
+	}
+}
+
+// wrapped breaks text into rows of the width, at most 4.
+func wrapped(st lipgloss.Style, text string, w int) []string {
+	lines := strings.Split(ansi.Wrap(text, w, " "), "\n")
+	out := make([]string, 0, min(len(lines), 4))
+	for _, l := range lines[:min(len(lines), 4)] {
+		out = append(out, st.Render(fit(l, w)))
 	}
 	return out
 }

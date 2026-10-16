@@ -40,6 +40,9 @@ type Options struct {
 	Images preview.ImageMode
 	// Watch reloads what is on screen when files or git state change.
 	Watch bool
+	// Base is the branch Branch Changes compare with; "" looks it up
+	// (git.DefaultBaseRef).
+	Base string
 }
 
 type pane int
