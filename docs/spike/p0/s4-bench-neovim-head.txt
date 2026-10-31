@@ -1,0 +1,17 @@
+rev=HEAD blobs=3943 bytes=62821267 (59.9 MiB)
+
+# 一覧
+git ls-tree -r -z                            median      20.5 ms  min      18.5 ms  (n=3943)
+gix rev_parse + tree traverse                median       0.8 ms  min       0.7 ms  (n=3943)
+worktree walk (std::fs, .git を除く)            median       9.4 ms  min       9.2 ms  (n=3943)
+
+# 全 blob の読み取り
+git cat-file --batch（1 プロセス）                 median     106.4 ms  min     105.6 ms  (n=3943)
+gix find_object                              median      78.0 ms  min      77.9 ms  (n=62821267)
+worktree std::fs::read（同じパス）                 median     144.4 ms  min     143.0 ms  (n=62821267)
+
+# 1 ファイルずつ（198 件の標本、合計時間）
+git cat-file blob（1 ファイル 1 プロセス）             median    3390.0 ms  min    3351.8 ms  (n=2833869)
+git cat-file --batch（常駐 1 プロセス）              median      24.1 ms  min      23.8 ms  (n=2833869)
+gix find_object                              median       3.6 ms  min       3.6 ms  (n=2833869)
+worktree std::fs::read                       median       6.9 ms  min       6.9 ms  (n=2833869)

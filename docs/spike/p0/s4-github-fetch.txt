@@ -1,0 +1,26 @@
+exit=exit status: 0
+--- stdout
+--- stderr
+From https://github.com/neovim/neovim
+ * [new ref]               refs/pull/39871/head -> refs/replor/pr/39871/head
+ * [new ref]               refs/pull/39791/head -> refs/replor/pr/39791/head
+ * [new ref]               refs/pull/39773/head -> refs/replor/pr/39773/head
+ * [new ref]               refs/pull/39735/head -> refs/replor/pr/39735/head
+ * [new ref]               refs/pull/39727/head -> refs/replor/pr/39727/head
+ * [new ref]               refs/pull/39672/head -> refs/replor/pr/39672/head
+ * [new ref]               refs/pull/39642/head -> refs/replor/pr/39642/head
+ * [new ref]               refs/pull/39628/head -> refs/replor/pr/39628/head
+ * [new ref]               refs/pull/39586/head -> refs/replor/pr/39586/head
+ * [new ref]               refs/pull/39559/head -> refs/replor/pr/39559/head
+ * [new ref]               refs/pull/39502/head -> refs/replor/pr/39502/head
+ * [new ref]               refs/pull/39496/head -> refs/replor/pr/39496/head
+ * [new ref]               refs/pull/39470/head -> refs/replor/pr/39470/head
+ * [new ref]               refs/pull/39391/head -> refs/replor/pr/39391/head
+ * [new ref]               refs/pull/39378/head -> refs/replor/pr/39378/head
+ * [new ref]               refs/pull/39258/head -> refs/replor/pr/39258/head
+ * [new ref]               refs/pull/39200/head -> refs/replor/pr/39200/head
+ * [new ref]               refs/pull/39181/head -> refs/replor/pr/39181/head
+ * [new ref]               refs/pull/39112/head -> refs/replor/pr/39112/head
+ * [new ref]               refs/pull/39073/head -> refs/replor/pr/39073/head
+ * [new ref]               refs/pull/39033/head -> refs/replor/pr/39033/head
+ * [new ref]               refs/pull/38999/head -> refs/replor/pr/38999/head

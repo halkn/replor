@@ -1,0 +1,29 @@
+# S1: ghostty
+
+- 日時: 2026-10-31 22:08
+- uname: `Darwin 27.0.0 arm64`
+- mdvu: `mdvu 0.10.2`
+- mdvu の auto が選ぶ protocol（環境変数からの推定）: kitty
+
+| 環境変数 | 値 |
+|---|---|
+| `TERM` | `xterm-ghostty` |
+| `TERM_PROGRAM` | `ghostty` |
+| `TERM_PROGRAM_VERSION` | `1.3.1` |
+| `COLORTERM` | `truecolor` |
+| `KITTY_WINDOW_ID` | `(未設定)` |
+| `KONSOLE_VERSION` | `(未設定)` |
+| `TMUX` | `(未設定)` |
+| `WEZTERM_EXECUTABLE` | `(未設定)` |
+| `WEZTERM_PANE` | `(未設定)` |
+| `GHOSTTY_RESOURCES_DIR` | `/Applications/Ghostty.app/Contents/Resources/ghostty` |
+| `WT_SESSION` | `(未設定)` |
+| `WSLENV` | `(未設定)` |
+| `WSL_DISTRO_NAME` | `(未設定)` |
+
+| --images | 図の表示 | 日本語ラベル | スクロール時の残骸なし | 終了後の残骸なし | メモ |
+|---|---|---|---|---|---|
+| auto | 可 | 可 | 可 | 可 |  |
+| kitty | 可 | 可 | 可 | 可 |  |
+| iterm2 | 不可 | - | - | - |  |
+

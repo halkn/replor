@@ -1,0 +1,11 @@
+[package]
+name = "s2-merman"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+
+# 0.7.0（mdvu の現行）と 0.9.3 を同じ入力で並べるため、両方を別名で入れる。
+[dependencies]
+merman07 = { package = "merman", version = "=0.7.0", default-features = false, features = ["ascii"] }
+merman09 = { package = "merman", version = "=0.9.3", default-features = false, features = ["ascii", "diagram-flowchart", "diagram-sequence", "diagram-er"] }
+unicode-width = "0.2.2"
