@@ -1,0 +1,215 @@
+=================== render__mermaid_invalid_80.snap
+@@ -1,5 +1,6 @@
+ ---
+ source: tests/render.rs
++assertion_line: 170
+ expression: "plain(\"tests/fixtures/mermaid/invalid.md\", \"80\")"
+ ---
+ # Invalid syntax
+@@ -8,8 +9,8 @@
+ The diagram below cannot be parsed and falls back to its source.
+ 
+ ╭─ Mermaid render error ────────────────────────────────────────────────────────
+-│ Diagram parse error (flowchart-v2): UnrecognizedToken { token: (19,
+-│ Arrow(LinkToken { end: "-->", edge_type: "arrow_poin…
++│ Diagram parse error (flowchart-v2): unexpected edge operator; expected node
++│ identifier, edge label
+ ├───────────────────────────────────────────────────────────────────────────────
+ │ graph LR
+ │   A -->
+=================== render__mermaid_japanese_80.snap
+@@ -1,5 +1,6 @@
+ ---
+ source: tests/render.rs
++assertion_line: 165
+ expression: "plain(\"tests/fixtures/mermaid/japanese.md\", \"80\")"
+ ---
+ # 日本語ラベル
+@@ -8,7 +9,7 @@
+ ╭─ mermaid
+ │ ┌──────┐     ┌──────────┐     ┌──────┐
+ │ │      │     │          │     │      │
+-│ │ 開始   ├────►│ レビュー     ├────►│ 完了   │
++│ │ 開始 ├────►│ レビュー ├────►│ 完了 │
+ │ │      │     │          │     │      │
+ │ └──────┘     └──────────┘     └──────┘
+ ╰─
+=================== render__mermaid_mode_ascii.snap
+@@ -1,19 +1,20 @@
+ ---
+ source: tests/render.rs
++assertion_line: 191
+ expression: "plain_with(\"tests/fixtures/mermaid/sequence.md\", \"80\", &\n[\"--mermaid\", \"ascii\"])"
+ ---
+ # Sequence
+ ────────────────────────────────────────────────────────────────────────────────
+ 
+ ╭─ mermaid
+-│ +-------+     +-----+
+-│ | Alice |     | Bob |
+-│ +---+---+     +--+--+
+-│     |            |
+-│     | Request review
+-│     +----------->|
+-│     |            |
+-│     | Approved   |
+-│     |<...........+
+-│     |            |
++│ +-------+         +-----+
++│ | Alice |         | Bob |
++│ +---+---+         +--+--+
++│     |                |
++│     | Request review |
++│     +--------------->|
++│     |                |
++│     | Approved       |
++│     |<...............+
++│     |                |
+ ╰─
+=================== render__mermaid_sequence_80.snap
+@@ -1,19 +1,20 @@
+ ---
+ source: tests/render.rs
++assertion_line: 157
+ expression: "plain(\"tests/fixtures/mermaid/sequence.md\", \"80\")"
+ ---
+ # Sequence
+ ────────────────────────────────────────────────────────────────────────────────
+ 
+ ╭─ mermaid
+-│ ┌───────┐     ┌─────┐
+-│ │ Alice │     │ Bob │
+-│ └───┬───┘     └──┬──┘
+-│     │            │
+-│     │ Request review
+-│     ├───────────►│
+-│     │            │
+-│     │ Approved   │
+-│     │◄┈┈┈┈┈┈┈┈┈┈┈┤
+-│     │            │
++│ ┌───────┐         ┌─────┐
++│ │ Alice │         │ Bob │
++│ └───┬───┘         └──┬──┘
++│     │                │
++│     │ Request review │
++│     ├───────────────►│
++│     │                │
++│     │ Approved       │
++│     │◄┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┤
++│     │                │
+ ╰─
+=================== render__mermaid_state_80.snap
+@@ -1,16 +1,51 @@
+ ---
+ source: tests/render.rs
++assertion_line: 164
+ expression: "plain(\"tests/fixtures/mermaid/state.md\", \"80\")"
+ ---
+ # State diagram
+ ────────────────────────────────────────────────────────────────────────────────
+ 
+-╭─ Mermaid diagram not supported as text ───────────────────────────────────────
+-│ ASCII rendering does not support diagram type `state`
+-├───────────────────────────────────────────────────────────────────────────────
+-│ stateDiagram-v2
+-│   [*] --> Draft
+-│   Draft --> Review
+-│   Review --> Published
+-│   Published --> [*]
+-╰───────────────────────────────────────────────────────────────────────────────
++╭─ mermaid
++│ ╭───────────╮
++│ │     ●     │
++│ ╰─────┬─────╯
++│       │
++│       │
++│       │
++│       │
++│       ▼
++│ ┌───────────┐
++│ │           │
++│ │   Draft   │
++│ │           │
++│ └─────┬─────┘
++│       │
++│       │
++│       │
++│       │
++│       ▼
++│ ┌───────────┐
++│ │           │
++│ │   Review  │
++│ │           │
++│ └─────┬─────┘
++│       │
++│       │
++│       │
++│       │
++│       ▼
++│ ┌───────────┐
++│ │           │
++│ │ Published │
++│ │           │
++│ └─────┬─────┘
++│       │
++│       │
++│       │
++│       │
++│       ▼
++│ ╭───────────╮
++│ │     ◎     │
++│ ╰───────────╯
++╰─
+=================== render__mermaid_unsupported_80.snap
+@@ -1,5 +1,6 @@
+ ---
+ source: tests/render.rs
++assertion_line: 175
+ expression: "plain(\"tests/fixtures/mermaid/unsupported.md\", \"80\")"
+ ---
+ # Unsupported family
+@@ -7,11 +8,36 @@
+ 
+ stateDiagram-v2 has no terminal text renderer, so the source is shown.
+ 
+-╭─ Mermaid diagram not supported as text ───────────────────────────────────────
+-│ ASCII rendering does not support diagram type `state`
+-├───────────────────────────────────────────────────────────────────────────────
+-│ stateDiagram-v2
+-│   [*] --> Draft
+-│   Draft --> Published
+-│   Published --> [*]
+-╰───────────────────────────────────────────────────────────────────────────────
++╭─ mermaid
++│ ╭───────────╮
++│ │     ●     │
++│ ╰─────┬─────╯
++│       │
++│       │
++│       │
++│       │
++│       ▼
++│ ┌───────────┐
++│ │           │
++│ │   Draft   │
++│ │           │
++│ └─────┬─────┘
++│       │
++│       │
++│       │
++│       │
++│       ▼
++│ ┌───────────┐
++│ │           │
++│ │ Published │
++│ │           │
++│ └─────┬─────┘
++│       │
++│       │
++│       │
++│       │
++│       ▼
++│ ╭───────────╮
++│ │     ◎     │
++│ ╰───────────╯
++╰─

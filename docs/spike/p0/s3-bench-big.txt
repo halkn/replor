@@ -1,0 +1,10 @@
+files=1 rows=50001 changed=50000 biggest_file_rows=50001 parse=4.7 ms
+highlight per file (初回オープン)          n=     1  p50 4896.112 ms  p95 4896.112 ms  max 4896.112 ms
+Unified Full 全ファイル                   n=  1162  p50   22.773 ms  p95   23.738 ms  max   27.987 ms
+Unified Full 最大のファイル                 n=  1162  p50   22.773 ms  p95   23.738 ms  max   27.987 ms
+Unified Window 全ファイル                 n=  1162  p50    0.243 ms  p95    0.256 ms  max    0.282 ms
+Unified Window 最大のファイル               n=  1162  p50    0.243 ms  p95    0.256 ms  max    0.282 ms
+Split Full 全ファイル                     n=  1162  p50   21.069 ms  p95   21.764 ms  max   22.307 ms
+Split Full 最大のファイル                   n=  1162  p50   21.069 ms  p95   21.764 ms  max   22.307 ms
+Split Window 全ファイル                   n=  1162  p50    0.251 ms  p95    0.261 ms  max    0.293 ms
+Split Window 最大のファイル                 n=  1162  p50    0.251 ms  p95    0.261 ms  max    0.293 ms
