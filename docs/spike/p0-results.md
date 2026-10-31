@@ -7,7 +7,7 @@
 - macOS（Darwin 27.0.0、arm64）、rustc 1.99.1、git 2.54.0（Apple Git-157）、release ビルド
 - エージェントの計測は Claude Code の sandbox（macOS Seatbelt）の中で動かした。ファイルの open とプロセスの起動は sandbox の分だけ遅く出ている可能性がある。どれもキャッシュが温まった状態の値
 - 依存の版: merman 0.7.0 / 0.9.3、ratatui 0.30.2、crossterm 0.29.0、syntect 5.3.0、gix 0.90.0、ratatui-image 11.1.0
-- 検証に使ったコードは `spike/`（S ごとの crate）。fixture は `spike/fixtures/`
+- 検証に使ったコードは `spike/`（S ごとの crate）で、ADR-0001 の Accepted 後に削除した。コミット `151d461` に残っている。fixture は `docs/spike/p0/fixtures/`、再確認用のスクリプトは `docs/spike/p0/scripts/` に移した
 
 ## 一覧
 
@@ -24,21 +24,21 @@ macOS ＋ Ghostty とその中の herdr は成立（herdr は `--images kitty` �
 
 ### 準備したもの
 
-- `spike/s1/check-images.sh <環境名>`
+- `docs/spike/p0/scripts/check-images.sh <環境名>`
   - 環境変数（`TERM`・`TERM_PROGRAM`・`KITTY_WINDOW_ID`・`TMUX`・`WSLENV`・`HERDR*` など）を記録する
   - mdvu 0.10.2 の `protocol_from_env` と同じ判定で、`auto` が選ぶ protocol を推定する
   - mdvu を `--mermaid image --images auto` → `kitty` → `iterm2` の順に起動し、表示の可否を対話で記録する
   - 結果は `s1-<環境名>.md` に書く
-- `spike/fixtures/mermaid-ja.md`: 日本語ラベルの flowchart・sequenceDiagram・erDiagram、Azure Wiki 形式の `::: mermaid`、曖昧幅の文字のラベル
-- `spike/fixtures/long-ja.md`: スクロールで図と画像（`img/gradient.png`）が上下端をまたぐ配置の長い文書
-- `spike/s1-picker`: mdvu の方式で表示できない環境があったときの比較用。docsail と同じ `Picker::from_query_stdio` で protocol を選び、問い合わせにかかった時間を表示する
+- `docs/spike/p0/fixtures/mermaid-ja.md`: 日本語ラベルの flowchart・sequenceDiagram・erDiagram、Azure Wiki 形式の `::: mermaid`、曖昧幅の文字のラベル
+- `docs/spike/p0/fixtures/long-ja.md`: スクロールで図と画像（`img/gradient.png`）が上下端をまたぐ配置の長い文書
+- `spike/s1-picker`（削除済み）: mdvu の方式で表示できない環境があったときの比較用。docsail と同じ `Picker::from_query_stdio` で protocol を選び、問い合わせにかかった時間を表示する
 
 ### 分かったこと
 
 - herdr の中では、herdr が `TERM_PROGRAM=herdr`・`TERM=xterm-256color` を設定し、外側の端末の `TERM_PROGRAM=ghostty` を隠す。mdvu の `protocol_from_env` はどれにも当たらないので、`auto` は画像を出さない。`experimental.kitty_graphics = true` のとき、`--images kitty` で強制すれば kitty の配置・スクロール時の切り出し・終了時の解放まで問題なく動いた。
 - herdr の `experimental.kitty_graphics` が有効かは環境変数から分からない（`HERDR_*` には出ない）。`TERM_PROGRAM=herdr` を kitty と判定すると、無効のときに escape sequence がそのまま流れうる（未確認）。
 
-- mdvu 0.10.2（merman 0.7.0）は、erDiagram の属性名が非 ASCII（例: `string 氏名`）だと merman-core の `er.rs:851` で panic し、文書全体を表示できない（`--mermaid unicode` でも起きる）。エンティティ名と関係のラベルが日本語なだけなら起きない。S1 の fixture は属性名を ASCII にし、日本語は属性のコメントに置いた。panic する例は `spike/fixtures/mermaid-ja-extra.md` に残した。
+- mdvu 0.10.2（merman 0.7.0）は、erDiagram の属性名が非 ASCII（例: `string 氏名`）だと merman-core の `er.rs:851` で panic し、文書全体を表示できない（`--mermaid unicode` でも起きる）。エンティティ名と関係のラベルが日本語なだけなら起きない。S1 の fixture は属性名を ASCII にし、日本語は属性のコメントに置いた。panic する例は `docs/spike/p0/fixtures/mermaid-ja-extra.md` に残した。
 - 描画コアは merman を `catch_unwind` の内側で呼び、1 つの図の失敗で文書全体を止めないようにする必要がある（概念設計の Acceptance Criteria「文書全体の表示は止まらない」）。
 
 ### 記入表
@@ -231,7 +231,7 @@ DESIGN.md 7.3 の環境変数の許可リストには、足りないものがあ
 
 ### Azure DevOps
 
-未実施（アクセスできる環境が無い）。PR の ref 名と OID での fetch の可否（概念設計の Open Questions Q5）は、P3 で Azure DevOps のリポジトリが使えるようになった時点で確かめる。そのための `spike/s4/check-azure-devops.sh` を用意してある。使い方は `<clone の URL> <PR 番号> [PR の source commit の OID]` で、次を順に行う。
+未実施（アクセスできる環境が無い）。PR の ref 名と OID での fetch の可否（概念設計の Open Questions Q5）は、P3 で Azure DevOps のリポジトリが使えるようになった時点で確かめる。そのための `docs/spike/p0/scripts/check-azure-devops.sh` を用意してある。使い方は `<clone の URL> <PR 番号> [PR の source commit の OID]` で、次を順に行う。
 
 1. 使い捨ての clone を新しく作る。
 2. `git ls-remote origin 'refs/pull/<N>/*'` で PR の ref 名を記録する。
@@ -244,12 +244,12 @@ git の呼び出しは `contract.rs` と同じ契約を shell で組んだもの
 
 | 項目 | 確認したこと | 結果 |
 |---|---|---|
-| S1 | Ghostty と、その中の herdr で `spike/s1/check-images.sh` を実行。長い文書（`spike/fixtures/long-ja.md`）を `--images kitty` でスクロール | 上の記入表のとおり。長い文書でも、上下端をまたぐ図・画像に残骸や欠けは出なかった |
+| S1 | Ghostty と、その中の herdr で `docs/spike/p0/scripts/check-images.sh` を実行。長い文書（`docs/spike/p0/fixtures/long-ja.md`）を `--images kitty` でスクロール | 上の記入表のとおり。長い文書でも、上下端をまたぐ図・画像に残骸や欠けは出なかった |
 | S2 | Ghostty で `docs/spike/p0/s2-merman-output.md` を表示 | `Unicode` profile で枠が揃う。Ghostty は曖昧幅を 1 列で描く |
-| S3 | Ghostty で `spike/target/release/s3-diff tui spike/.work/s3-input.diff` を操作（スクロール・ファイル切り替え・split） | 遅れや固まりは感じなかった |
+| S3 | Ghostty で `s3-diff tui`（PR #39773 の diff の前に日本語の diff を足した入力） を操作（スクロール・ファイル切り替え・split） | 遅れや固まりは感じなかった |
 
 S1 のスクリーンショットは Ghostty の `auto`（`docs/spike/p0/s1/s1-ghostty-auto.png`）と `kitty`（`s1-ghostty-kitty.png`）。3 図とも日本語ラベルが読める。`auto` の画像では flowchart が上端で切り出されており、kitty の source rectangle による切り出しが働いている。sequenceDiagram の「承認 ✅」の豆腐は端末上でも同じ（S2 の PNG の項）。herdr の中のスクリーンショットは撮っておらず、`--images kitty` での表示は Ghostty と同じだったとユーザーが報告した。
 
 個別の報告がないもの: S3 の 5 万行の入力と、Diff の中の日本語の列の揃い。
 
-WSL の環境で S1・S2 を確かめるときは、同じ手順で `spike/s1/check-images.sh <環境名>` と `cat docs/spike/p0/s2-merman-output.md` を使う。Noctty では OpenGL renderer で動いているか（Open Questions Q1）も記録する。
+WSL の環境で S1・S2 を確かめるときは、同じ手順で `docs/spike/p0/scripts/check-images.sh <環境名>` と `cat docs/spike/p0/s2-merman-output.md` を使う。Noctty では OpenGL renderer で動いているか（Open Questions Q1）も記録する。

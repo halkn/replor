@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # P0 Spike S4（Azure DevOps）: PR の ref 名を確かめ、PR head を専用の名前空間へ fetch する。
 #
-# 使い方: spike/s4/check-azure-devops.sh <clone の URL> <PR 番号> [PR の source commit の OID]
+# 使い方: docs/spike/p0/scripts/check-azure-devops.sh <clone の URL> <PR 番号> [PR の source commit の OID]
 #   - 壊れても困らない clone を ./s4-ado-work/repo に新しく作る（既存の clone には触れない）
 #   - source commit の OID は PR 画面か `az repos pr show --id <N> --query lastMergeSourceCommit.commitId`
 #     で分かる。渡すと、OID を直接 fetch できるかも試す（Open Questions Q5）
 # 結果は ./s4-ado-result.md に書く。
 #
-# git の呼び出しは spike/s4-revision/src/contract.rs と同じ実行契約（旧 replor の DESIGN.md 7.3）
+# git の呼び出しは P0 Spike の s4-revision（コミット 151d461 の spike/s4-revision/src/contract.rs）と同じ実行契約（旧 replor の DESIGN.md 7.3）
 # を shell で組んだもの。Rust が無い環境でも動かせるようにしている。
 set -u
 

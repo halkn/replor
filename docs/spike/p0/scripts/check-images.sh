@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # P0 Spike S1: 端末の環境変数を記録し、mdvu の --images を auto → kitty → iterm2 の順に試す。
 #
-# 使い方: spike/s1/check-images.sh <環境名>
+# 使い方: docs/spike/p0/scripts/check-images.sh <環境名>
 #   環境名の例: ghostty / ghostty-herdr / noctty / noctty-herdr / wezterm / wezterm-herdr
 # mdvu は PATH 上のものを使う。別のものを使うときは MDVU=/path/to/mdvu を付ける。
 # 結果は カレントディレクトリの s1-<環境名>.md に追記する。

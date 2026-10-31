@@ -64,7 +64,7 @@ P1 以降の設計判断のうち、次の4つは検証してから決める必�
   - FETCH_HEAD・remote-tracking ref・tag・commit-graph を書かず、auto gc と maintenance を起こさない（`--no-write-fetch-head --no-tags --no-auto-gc --no-auto-maintenance --no-write-commit-graph`、`-c gc.auto=0 -c maintenance.auto=false -c fetch.writeCommitGraph=false`）。
   - 前後で比べると、status・HEAD・symbolic-ref・index のハッシュは一致し、ref の差分は `refs/replor/` だけだった。
 - **Git 実行契約の環境変数の許可リストに、fetch のときだけ `HTTPS_PROXY`・`HTTP_PROXY`・`ALL_PROXY`・`NO_PROXY`（小文字も含む）と `SSH_AUTH_SOCK` を足す。** 許可リストのままでは、プロキシ配下の fetch が失敗した。
-- Azure DevOps の PR の ref 名と、OID で直接 fetch できるか（概念設計の Open Questions Q5）は未検証のまま残す。git CLI で fetch する方式は refspec を変えるだけで対応できるので、この ADR の決定には影響しない。P3 で Azure DevOps のリポジトリが使えるようになった時点で、`spike/s4/check-azure-devops.sh` の手順で確かめる。
+- Azure DevOps の PR の ref 名と、OID で直接 fetch できるか（概念設計の Open Questions Q5）は未検証のまま残す。git CLI で fetch する方式は refspec を変えるだけで対応できるので、この ADR の決定には影響しない。P3 で Azure DevOps のリポジトリが使えるようになった時点で、`docs/spike/p0/scripts/check-azure-devops.sh` で確かめる。
 
 ## Consequences
 
@@ -76,4 +76,4 @@ P1 以降の設計判断のうち、次の4つは検証してから決める必�
 - 未検証のまま P1 に進むリスクが2つある。
   - WSL（Noctty・WezTerm とその中の herdr）での画像表示: mdvu の環境変数による判定が働かない場合は、`--images` の指定か設定の既定値で補う想定。Noctty の Direct3D 11 renderer では kitty の画像が描かれない（Open Questions Q1）。
   - Azure DevOps の PR の ref 名（Q5）。
-- `spike/` は、この ADR が Accepted になったら削除する。`spike/s1/check-images.sh` と `spike/s4/check-azure-devops.sh` は、上の未検証のリスクを確かめる手順として、削除前に設計ドキュメントへ移すか残すかを決める。
+- `spike/` は Accepted の後に削除した（コードはコミット `151d461` に残る）。上の未検証のリスクを確かめるためのスクリプトと fixture は `docs/spike/p0/scripts/`・`docs/spike/p0/fixtures/` に移した。

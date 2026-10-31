@@ -1,8 +1,0 @@
-# P0 Spike の crate 群（docs/design/spike-p0.md）。本実装から参照しない。ADR を記録したら削除する。
-[workspace]
-resolver = "3"
-members = ["s1-picker", "s2-merman", "s3-diff", "s4-revision"]
-
-[workspace.package]
-edition = "2024"
-publish = false
