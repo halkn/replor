@@ -4,7 +4,7 @@ replor は、ローカルのリポジトリや Wiki のクローンと PR head �
 
 ## 現在のフェーズ
 
-P0 Spike は完了し、次は P1 Core ＋ Explorer（`docs/design/concept.md` のフェーズ）。本実装の crate はまだない。画像の層・merman の版・Diff の描き方・Git の読み取り方式を触る前に `docs/adr/0001-p0-spike.md` を読む。検証の根拠と、未検証の環境（WSL・Azure DevOps）を確かめるスクリプトは `docs/spike/` にある。
+P0 Spike は完了し、次は P1 Core ＋ Explorer（`docs/design/concept.md` のフェーズ）。本実装の crate はまだない。crate の構成・Snapshot の trait・mdvu の取り込み・`tests/render.rs`・設定ファイルを触る前に `docs/design/p1-core.md` を読む。画像の層・merman の版・Diff の描き方・Git の読み取り方式を触る前に `docs/adr/0001-p0-spike.md` を読む。検証の根拠と、未検証の環境（WSL・Azure DevOps）を確かめるスクリプトは `docs/spike/` にある。
 
 ## 検証
 
