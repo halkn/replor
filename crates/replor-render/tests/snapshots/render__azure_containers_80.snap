@@ -1,0 +1,30 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain_with(\"tests/fixtures/azure-devops/containers.md\", \"80\", &\n[\"--flavor\", \"azure-devops\"])"
+---
+# Containers
+────────────────────────────────────────────────────────────────────────────────
+
+A Mermaid container:
+
+╭─ mermaid
+│ ┌──────┐     ┌───────┐
+│ │      │     │       │
+│ │ Plan ├────►│ Build │
+│ │      │     │       │
+│ └──────┘     └───────┘
+╰─
+
+A video embed:
+
+[video] Video embeds are not supported in a terminal
+│ <iframe src="https://example.com/embed/1"></iframe>
+
+A work item query:
+
+[query-table] Work item query requires Azure DevOps
+
+An unknown container keeps its body:
+
+[unknown-thing] Unsupported ::: unknown-thing block
+│ this text must survive

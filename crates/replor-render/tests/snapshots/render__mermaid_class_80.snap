@@ -1,0 +1,21 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain(\"tests/fixtures/mermaid/class.md\", \"80\")"
+---
+# Class diagram
+────────────────────────────────────────────────────────────────────────────────
+
+╭─ mermaid
+│ ┌───────────────┐
+│ │ Document      │
+│ ├───────────────┤
+│ │ +String title │
+│ ├───────────────┤
+│ │ +render()     │
+│ └───────────────┘
+│         △
+│         │
+│   ┌──────────┐
+│   │ WikiPage │
+│   └──────────┘
+╰─

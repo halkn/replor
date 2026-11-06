@@ -1,0 +1,17 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain(\"tests/fixtures/mermaid/flowchart-warning.md\", \"80\")"
+---
+# Flowchart keyword
+────────────────────────────────────────────────────────────────────────────────
+
+Azure DevOps requires graph, so this diagram is flagged.
+
+! Azure DevOps requires `graph`; `flowchart` is not supported
+╭─ mermaid
+│ ┌───────┐     ┌──────┐
+│ │       │     │      │
+│ │ Start ├────►│ Done │
+│ │       │     │      │
+│ └───────┘     └──────┘
+╰─

@@ -1,0 +1,32 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain_with(\"tests/fixtures/azure-devops/toc.md\", \"80\", &\n[\"--flavor\", \"azure-devops\"])"
+---
+# Table of contents
+────────────────────────────────────────────────────────────────────────────────
+
+Contents
+  • Table of contents
+    • First section
+      • A nested heading
+    • Second section
+
+## First section
+────────────────────────────────────────────────────────────────────────────────
+
+Body text.
+
+### A nested heading
+
+More body text.
+
+## Second section
+────────────────────────────────────────────────────────────────────────────────
+
+The macro below is ignored because only the first one expands.
+
+[toc] Ignored: only the first [[_TOC_]] is expanded
+
+The lowercase form is not a macro: [[toc]]
+
+[child pages] Child pages unavailable in single-file mode

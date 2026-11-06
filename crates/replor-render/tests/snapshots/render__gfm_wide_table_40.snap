@@ -1,0 +1,30 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain(\"tests/fixtures/gfm/wide-table.md\", \"40\")"
+---
+# Table too wide for a grid
+────────────────────────────────────────
+
+Six columns of unbreakable identifiers
+cannot fit a narrow terminal, so the
+table degrades to a vertical list
+instead of a broken grid.
+
+Row 1
+  identifier: alpha_one
+  descriptor: beta_two
+  qualifier: gamma_three
+  annotation: delta_four
+  とても長い日本語の見出し: これはとても
+                            長い説明文で
+                            す
+  remainder: epsilon_five
+
+Row 2
+  identifier: zeta_six
+  descriptor: eta_seven
+  qualifier: theta_eight
+  annotation: iota_nine
+  とても長い日本語の見出し: 二行目の日本
+                            語の説明です
+  remainder: kappa_ten

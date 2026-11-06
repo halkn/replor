@@ -1,0 +1,21 @@
+[package]
+name = "replor-render"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+merman = { version = "0.7.0", default-features = false, features = ["ascii", "render"] }
+pulldown-cmark = { version = "0.13.4", default-features = false }
+resvg = { version = "0.46.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"] }
+thiserror = "2.0"
+unicode-segmentation = "1.12"
+unicode-width = "0.2.2"
+
+[dev-dependencies]
+insta = "1.43"
+tempfile = "3.14"

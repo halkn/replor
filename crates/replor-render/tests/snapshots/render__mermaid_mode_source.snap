@@ -1,0 +1,12 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain_with(\"tests/fixtures/mermaid/sequence.md\", \"80\", &\n[\"--mermaid\", \"source\"])"
+---
+# Sequence
+────────────────────────────────────────────────────────────────────────────────
+
+╭─ mermaid (source)
+│ sequenceDiagram
+│   Alice->>Bob: Request review
+│   Bob-->>Alice: Approved
+╰─

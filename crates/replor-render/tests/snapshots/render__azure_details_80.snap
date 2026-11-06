@@ -1,0 +1,19 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain_with(\"tests/fixtures/azure-devops/details.md\", \"80\", &\n[\"--flavor\", \"azure-devops\"])"
+---
+# Details
+────────────────────────────────────────────────────────────────────────────────
+
+▾ Deployment steps
+│ 1. Build the artifact.
+│ 2. Run the smoke tests.
+│
+│ ┌───────┬────────┐
+│ │ Stage │ Owner  │
+│ ├───────┼────────┤
+│ │ build │ team-a │
+│ │ test  │ team-b │
+│ └───────┴────────┘
+
+Text after the block.

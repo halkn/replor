@@ -1,0 +1,20 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain(\"tests/fixtures/mermaid/invalid.md\", \"80\")"
+---
+# Invalid syntax
+────────────────────────────────────────────────────────────────────────────────
+
+The diagram below cannot be parsed and falls back to its source.
+
+╭─ Mermaid render error ────────────────────────────────────────────────────────
+│ Diagram parse error (flowchart-v2): UnrecognizedToken { token: (19,
+│ Arrow(LinkToken { end: "-->", edge_type: "arrow_poin…
+├───────────────────────────────────────────────────────────────────────────────
+│ graph LR
+│   A -->
+│   --> B
+│   [[[
+╰───────────────────────────────────────────────────────────────────────────────
+
+Text after the diagram still renders.

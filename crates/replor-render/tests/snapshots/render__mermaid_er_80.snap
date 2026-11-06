@@ -1,0 +1,26 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain(\"tests/fixtures/mermaid/er.md\", \"80\")"
+---
+# Entity relationship
+────────────────────────────────────────────────────────────────────────────────
+
+╭─ mermaid
+│ ┌──────────┐
+│ │ CUSTOMER │
+│ └──────────┘
+│      ||
+│    places
+│       │
+│      o{
+│   ┌───────┐
+│   │ ORDER │
+│   └───────┘
+│      ||
+│   contains
+│       │
+│      |{
+│ ┌───────────┐
+│ │ LINE_ITEM │
+│ └───────────┘
+╰─
