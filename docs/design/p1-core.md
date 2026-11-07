@@ -190,6 +190,8 @@ pub enum EntryKind { File, Directory, Symlink, Submodule, Other }
 - 文書の読み取りと画像の解決は、`Arc<dyn Snapshot>` と文書の `SnapshotPath` を経由させる。
   - 置き換える対象は、mdvu の `input.rs` の `LoadedInput { text, display_name, base_dir }` と、`layout::inline::InlineContext` の `base_dir`・`content_root`。
   - stdin から読んだ文書（P5）は文書のパスを持たないので、mdvu と同じく画像を読まない。
+  - 文書は 64 MiB まで読む（`document::MAX_DOCUMENT_BYTES`）。mdvu は上限なく読んでいたが、リビジョンは他人の PR head でありうる。pack の中で数 MB に圧縮された blob が、展開すると数 GB になりうるため。
+  - 画像の参照は、`resolve` した後の文書のパスから解決し、content root もそのパスで決める。mdvu が文書のディレクトリを `canonicalize` していたのと同じ結果にするため。表示する名前と基準のパスは、開いたときのパスのままにする。
 - **表示用の基準のパスは、読み取りの経路と分ける。**
   - mdvu の `layout::inline::display_target` は、相対リンクと画像の表示先に `base_dir` を文字列のまま連結して出している。開くためではなく、表示のためだけの連結である。
   - `InlineContext` には、表示用の基準のパス（文字列）を、`SnapshotPath` とは別に持たせる。表示用のパスは正規化しない。
