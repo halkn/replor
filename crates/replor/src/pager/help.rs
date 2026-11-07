@@ -39,6 +39,16 @@ pub const ENTRIES: &[Entry] = &[
         pane: Pane::Tree,
     },
     Entry {
+        keys: &["l"],
+        action: "Tree: expand a directory",
+        pane: Pane::Tree,
+    },
+    Entry {
+        keys: &["h"],
+        action: "Tree: collapse a directory, or go to the one above",
+        pane: Pane::Tree,
+    },
+    Entry {
         keys: &["Enter"],
         action: "Tree: open a file, expand or collapse a directory",
         pane: Pane::Tree,

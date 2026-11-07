@@ -48,6 +48,8 @@ pub enum Command {
     SwitchFocus,
     Reload,
     TreeMove(isize),
+    TreeExpand,
+    TreeCollapse,
     TreeOpen,
     Preview(Input),
     Ignored,
@@ -77,6 +79,8 @@ pub fn route(focus: Focus, mode: Mode, key: KeyEvent) -> Command {
         Focus::Tree => match key.code {
             KeyCode::Char('j') | KeyCode::Down => Command::TreeMove(1),
             KeyCode::Char('k') | KeyCode::Up => Command::TreeMove(-1),
+            KeyCode::Char('l') => Command::TreeExpand,
+            KeyCode::Char('h') => Command::TreeCollapse,
             KeyCode::Enter => Command::TreeOpen,
             _ => Command::Ignored,
         },
@@ -188,6 +192,8 @@ impl App {
                 return Outcome::Replaced;
             }
             Command::TreeMove(delta) => self.tree.move_by(delta),
+            Command::TreeExpand => self.tree.expand(),
+            Command::TreeCollapse => self.tree.collapse(),
             Command::TreeOpen => match self.tree.open() {
                 Opened::File(entry) if entry.kind == EntryKind::Submodule => {
                     self.content =

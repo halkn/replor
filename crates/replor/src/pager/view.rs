@@ -792,7 +792,7 @@ mod tests {
         state.apply(crate::pager::state::Action::ToggleHelp);
         let open = screen(&state, &lines).join("\n");
         assert!(open.contains("Keys"), "{open}");
-        assert!(open.contains("Half screen down / up"), "{open}");
+        assert!(open.contains("Tree: next entry"), "{open}");
 
         // A terminal too short for the whole list still reaches its end.
         assert!(!open.contains("Quit"), "{open}");

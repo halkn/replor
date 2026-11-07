@@ -93,6 +93,38 @@ impl Tree {
         }
     }
 
+    /// Expands the selected directory. Anything else is left as it is.
+    pub fn expand(&mut self) {
+        let Some(row) = self.rows.get(self.selected) else {
+            return;
+        };
+        if row.entry.kind == EntryKind::Directory && !row.expanded {
+            self.expanded.insert(row.entry.path.clone());
+            self.rebuild();
+        }
+    }
+
+    /// Collapses the selected directory, or, from anything else, moves to
+    /// the directory holding it, so repeated presses walk up the tree.
+    pub fn collapse(&mut self) {
+        let Some(row) = self.rows.get(self.selected) else {
+            return;
+        };
+        if row.entry.kind == EntryKind::Directory && row.expanded {
+            let path = row.entry.path.clone();
+            self.expanded.remove(&path);
+            self.rebuild();
+            return;
+        }
+        let depth = row.depth;
+        if let Some(parent) = self.rows[..self.selected]
+            .iter()
+            .rposition(|above| above.depth + 1 == depth)
+        {
+            self.selected = parent;
+        }
+    }
+
     pub fn open(&mut self) -> Opened {
         let Some(row) = self.rows.get(self.selected) else {
             return Opened::Nothing;
@@ -235,6 +267,42 @@ mod tests {
             names(&tree),
             ["docs", ".gitignore", "Cargo.toml", "README.md"]
         );
+    }
+
+    #[test]
+    fn h_and_l_collapse_and_expand_and_h_walks_up() {
+        let dir = fixture();
+        let mut tree = tree(dir.path(), "");
+        tree.expand();
+        tree.expand();
+        assert_eq!(
+            names(&tree)[..3],
+            ["docs", "  guide", "  index.md"].map(String::from)
+        );
+        tree.move_by(1);
+        tree.expand();
+        tree.move_by(1);
+        assert_eq!(tree.rows()[tree.selected()].entry.name, "intro.md");
+        // A file: up to its directory, then that directory closes, then up again.
+        tree.collapse();
+        assert_eq!(tree.rows()[tree.selected()].entry.name, "guide");
+        tree.collapse();
+        assert!(!names(&tree).contains(&"    intro.md".to_string()));
+        tree.collapse();
+        assert_eq!(tree.rows()[tree.selected()].entry.name, "docs");
+        tree.collapse();
+        assert_eq!(
+            names(&tree),
+            ["docs", ".gitignore", "Cargo.toml", "README.md"]
+        );
+        // At the top level there is nowhere further up.
+        tree.collapse();
+        assert_eq!(tree.selected(), 0);
+        // `l` on a file does nothing.
+        tree.move_by(2);
+        let before = names(&tree);
+        tree.expand();
+        assert_eq!(names(&tree), before);
     }
 
     #[test]
