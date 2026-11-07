@@ -1,0 +1,19 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain_with(\"tests/fixtures/mermaid/sequence.md\", \"80\", &\n[\"--mermaid\", \"ascii\"])"
+---
+# Sequence
+────────────────────────────────────────────────────────────────────────────────
+
+╭─ mermaid
+│ +-------+     +-----+
+│ | Alice |     | Bob |
+│ +---+---+     +--+--+
+│     |            |
+│     | Request review
+│     +----------->|
+│     |            |
+│     | Approved   |
+│     |<...........+
+│     |            |
+╰─

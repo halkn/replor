@@ -1,0 +1,64 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain_with(\"tests/fixtures/azure-devops/showcase.md\", \"80\", &\n[\"--flavor\", \"azure-devops\"])"
+---
+# Azure DevOps Wiki showcase
+────────────────────────────────────────────────────────────────────────────────
+
+Contents
+  • Azure DevOps Wiki showcase
+    • Work items and mentions
+    • Math
+    • Table with cell breaks
+    • Details
+    • Diagram
+    • Attachments
+
+## Work items and mentions
+────────────────────────────────────────────────────────────────────────────────
+
+Fixed #1234 after review by @jane.doe and @build-team.
+
+## Math
+────────────────────────────────────────────────────────────────────────────────
+
+Inline math $E = mc^2$ is shown as source, and so is $$\sum_{i=1}^{n} i$$.
+
+## Table with cell breaks
+────────────────────────────────────────────────────────────────────────────────
+
+┌───────┬─────────────┐
+│ Stage │ Notes       │
+├───────┼─────────────┤
+│ build │ compile     │
+│       │ package     │
+│ test  │ unit        │
+│       │ integration │
+└───────┴─────────────┘
+
+## Details
+────────────────────────────────────────────────────────────────────────────────
+
+▾ Rollback plan
+│ Revert the release branch and redeploy the previous tag.
+
+## Diagram
+────────────────────────────────────────────────────────────────────────────────
+
+╭─ mermaid
+│ ┌──────┐     ┌───────┐     ┌──────┐
+│ │      │     │       │     │      │
+│ │ Plan ├────►│ Build ├────►│ Ship │
+│ │      │     │       │     │      │
+│ └──────┘     └───────┘     └──────┘
+╰─
+
+## Attachments
+────────────────────────────────────────────────────────────────────────────────
+
+[image: architecture diagram]
+(tests/fixtures/azure-devops/.attachments/architecture.png)
+
+design.xlsx (tests/fixtures/azure-devops/.attachments/design.xlsx)
+
+[child pages] Child pages unavailable in single-file mode

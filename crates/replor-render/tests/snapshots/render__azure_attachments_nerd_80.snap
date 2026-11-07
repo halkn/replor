@@ -1,0 +1,28 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain_with(\"tests/fixtures/azure-devops/attachments.md\", \"80\", &\n[\"--flavor\", \"azure-devops\", \"--icons\", \"nerd\"])"
+---
+# Attachments
+────────────────────────────────────────────────────────────────────────────────
+
+An inline image:
+
+󰋩 architecture diagram
+(tests/fixtures/azure-devops/.attachments/architecture.png)
+
+A file attachment:
+
+design.xlsx (tests/fixtures/azure-devops/.attachments/design.xlsx)
+
+An attachment with no alt text:
+
+󰋩 screenshot.png (tests/fixtures/azure-devops/.attachments/screenshot.png)
+
+A page in a subdirectory reaching the attachments at the wiki root:
+
+󰋩 architecture diagram
+(tests/fixtures/azure-devops/../.attachments/architecture.png)
+
+The same file addressed from the wiki root:
+
+󰋩 architecture diagram (/.attachments/architecture.png)

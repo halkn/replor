@@ -1,0 +1,43 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "styled(\"tests/fixtures/gfm/code.md\", \"80\")"
+---
+ESC[2;90m# ESC[0mESC[1;4;96mCode blocksESC[0m
+ESC[2;90m────────────────────────────────────────────────────────────────────────────────ESC[0m
+
+A fenced block with a known language:
+
+ESC[90m╭─ rustESC[0m
+ESC[90m│ ESC[0mESC[2;90m// Entry point.ESC[0m
+ESC[90m│ ESC[0mESC[35mfnESC[0m ESC[94mmainESC[0mESC[90m()ESC[0m ESC[90m{ESC[0m
+ESC[90m│ ESC[0m    ESC[35mletESC[0m answerESC[90m:ESC[0m ESC[35mu32ESC[0m ESC[35m=ESC[0m ESC[33m42ESC[0mESC[90m;ESC[0m
+ESC[90m│ ESC[0m    ESC[35mletESC[0m greeting ESC[35m=ESC[0m ESC[92m"hello"ESC[0mESC[90m;ESC[0m
+ESC[90m│ ESC[0m    println!ESC[90m(ESC[0mESC[92m"ESC[0mESC[35m{greeting}ESC[0mESC[92m ESC[0mESC[35m{answer}ESC[0mESC[92m"ESC[0mESC[90m);ESC[0m
+ESC[90m│ ESC[0mESC[90m}ESC[0m
+ESC[90m╰─ESC[0m
+
+A language the highlighter does not know stays uniform:
+
+ESC[90m╭─ no-such-languageESC[0m
+ESC[90m│ ESC[0mESC[93mvalue = 1 // not a comment hereESC[0m
+ESC[90m╰─ESC[0m
+
+A block with no language at all:
+
+ESC[90m╭─ESC[0m
+ESC[90m│ ESC[0mESC[93mplain text, indentedESC[0m
+ESC[90m│ ESC[0mESC[93m    and kept as writtenESC[0m
+ESC[90m╰─ESC[0m
+
+Tabs expand to four columns:
+
+ESC[90m╭─ pythonESC[0m
+ESC[90m│ ESC[0mESC[35mdefESC[0m ESC[94mfESC[0mESC[90m():ESC[0m
+ESC[90m│ ESC[0m    ESC[35mreturnESC[0m ESC[92m"tab indented"ESC[0m
+ESC[90m╰─ESC[0m
+
+Long lines are never wrapped; the pager scrolls instead:
+
+ESC[90m╭─ jsonESC[0m
+ESC[90m│ ESC[0mESC[90m{ESC[0mESC[92m"a"ESC[0mESC[90m:ESC[0m ESC[33m1ESC[0mESC[90m,ESC[0m ESC[92m"b"ESC[0mESC[90m:ESC[0m ESC[90m[ESC[0mESC[35mtrueESC[0mESC[90m,ESC[0m ESC[35mfalseESC[0mESC[90m,ESC[0m ESC[35mnullESC[0mESC[90m],ESC[0m ESC[92m"c"ESC[0mESC[90m:ESC[0m ESC[92m"a fairly long string value to push past the width"ESC[0mESC[90m}ESC[0m
+ESC[90m╰─ESC[0m
