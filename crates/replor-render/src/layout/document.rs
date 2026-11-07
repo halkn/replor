@@ -517,26 +517,23 @@ mod tests {
     use crate::layout::icons::IconSet;
     use crate::layout::inline::InlineContext;
     use crate::markdown::model::{AlertKind, DiagramOutput, DiagramPng};
+    use crate::snapshot::memory::MemorySnapshot;
     use crate::source::SourceText;
-    use std::io::Write;
-    use std::path::Path;
+    use std::sync::Arc;
 
-    fn png(dir: &Path, name: &str, width: u32, height: u32) {
+    fn png(snapshot: &MemorySnapshot, name: &str, width: u32, height: u32) {
         let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
         bytes.extend_from_slice(&13u32.to_be_bytes());
         bytes.extend_from_slice(b"IHDR");
         bytes.extend_from_slice(&width.to_be_bytes());
         bytes.extend_from_slice(&height.to_be_bytes());
         bytes.extend_from_slice(&[8, 6, 0, 0, 0]);
-        std::fs::File::create(dir.join(name))
-            .expect("creating the fixture")
-            .write_all(&bytes)
-            .expect("writing the fixture");
+        snapshot.write(name, bytes);
     }
 
-    fn context(base_dir: &Path, images: bool) -> InlineContext {
+    fn context(snapshot: &Arc<MemorySnapshot>, images: bool) -> InlineContext {
         InlineContext {
-            base_dir: Some(base_dir.to_path_buf()),
+            source: Some(snapshot.source("doc.md")),
             images: images.then_some(ImageSupport {
                 protocol: Protocol::Kitty,
                 cell: CellSize {
@@ -558,9 +555,9 @@ mod tests {
 
     #[test]
     fn a_paragraph_holding_only_an_image_becomes_reserved_lines() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        png(dir.path(), "a.png", 200, 100);
-        let rendered = render("![alt](a.png)\n", &context(dir.path(), true));
+        let snapshot = MemorySnapshot::new("");
+        png(&snapshot, "a.png", 200, 100);
+        let rendered = render("![alt](a.png)\n", &context(&snapshot, true));
 
         assert_eq!(rendered.lines.len(), 5);
         let placement = rendered.lines[0]
@@ -601,8 +598,8 @@ mod tests {
 
     #[test]
     fn a_diagram_picture_becomes_reserved_lines() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        let rendered = render_diagram(&context(dir.path(), true));
+        let snapshot = MemorySnapshot::new("");
+        let rendered = render_diagram(&context(&snapshot, true));
         assert_eq!(rendered.lines.len(), 2);
         let placement = rendered.lines[0].image.as_ref().expect("picture");
         assert_eq!((placement.cols, placement.rows), (19, 2));
@@ -613,17 +610,17 @@ mod tests {
     /// rather than an empty gap.
     #[test]
     fn a_diagram_picture_without_a_protocol_shows_the_source() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        let rendered = render_diagram(&context(dir.path(), false));
+        let snapshot = MemorySnapshot::new("");
+        let rendered = render_diagram(&context(&snapshot, false));
         assert!(rendered.lines.iter().all(|l| l.image.is_none()));
         assert!(rendered.lines[0].text().contains("(source)"));
     }
 
     #[test]
     fn an_image_among_words_keeps_its_placeholder() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        png(dir.path(), "a.png", 200, 100);
-        let rendered = render("see ![alt](a.png) here\n", &context(dir.path(), true));
+        let snapshot = MemorySnapshot::new("");
+        png(&snapshot, "a.png", 200, 100);
+        let rendered = render("see ![alt](a.png) here\n", &context(&snapshot, true));
 
         assert!(rendered.lines.iter().all(|l| l.image.is_none()));
         assert!(rendered.lines[0].text().contains("[image: alt]"));
@@ -633,9 +630,9 @@ mod tests {
     /// images existed, which is what the golden snapshots assert.
     #[test]
     fn a_terminal_without_images_gets_the_placeholder_layout() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        png(dir.path(), "a.png", 200, 100);
-        let rendered = render("![alt](a.png)\n", &context(dir.path(), false));
+        let snapshot = MemorySnapshot::new("");
+        png(&snapshot, "a.png", 200, 100);
+        let rendered = render("![alt](a.png)\n", &context(&snapshot, false));
 
         assert_eq!(rendered.lines.len(), 1);
         assert!(rendered.lines[0].image.is_none());
@@ -796,9 +793,9 @@ mod tests {
 
     #[test]
     fn an_image_inside_a_quote_keeps_its_border_and_its_picture() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        png(dir.path(), "a.png", 200, 100);
-        let rendered = render("> ![alt](a.png)\n", &context(dir.path(), true));
+        let snapshot = MemorySnapshot::new("");
+        png(&snapshot, "a.png", 200, 100);
+        let rendered = render("> ![alt](a.png)\n", &context(&snapshot, true));
 
         assert!(rendered.lines[0].image.is_some());
         // The border is what the pager measures to place the image.

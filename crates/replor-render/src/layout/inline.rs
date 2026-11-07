@@ -12,12 +12,12 @@ use crate::markdown::model::{Inline, plain_text};
 
 #[derive(Debug, Clone, Default)]
 pub struct InlineContext {
-    /// Directory of the input file, used to display relative link targets and
-    /// to join document-relative image paths. Link targets are never opened.
+    /// Directory of the input file, used only to display relative link and
+    /// image targets. It is joined as text and never normalised or opened.
     pub base_dir: Option<PathBuf>,
-    /// The only directory images may be read from, when it is wider than
-    /// `base_dir`. See `image::content_root`.
-    pub content_root: Option<PathBuf>,
+    /// Where the document was read from, and so where its images are read
+    /// from. `None` (stdin) reads no images.
+    pub source: Option<crate::snapshot::DocumentSource>,
     /// How diagram blocks are presented. Diagrams are rendered before layout;
     /// this only selects between the rendered form, the source and an omitted
     /// marker.

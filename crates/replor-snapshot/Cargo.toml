@@ -1,0 +1,16 @@
+[package]
+name = "replor-snapshot"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+gix = { version = "0.90.0", default-features = false, features = ["revision", "max-performance", "sha1"] }
+ignore = "0.4.25"
+libc = "0.2"
+replor-render = { path = "../replor-render" }
+
+[dev-dependencies]
+tempfile = "3.14"

@@ -17,6 +17,13 @@ pub enum AppError {
         source: std::io::Error,
     },
 
+    #[error("{path}: {source}")]
+    Read {
+        path: String,
+        #[source]
+        source: crate::snapshot::SnapshotError,
+    },
+
     #[error("stdin: {source}")]
     StdinIo {
         #[source]

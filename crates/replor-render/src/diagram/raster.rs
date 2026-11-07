@@ -128,6 +128,8 @@ mod tests {
 
     /// A document must not be able to make `mdvu` read files by naming them
     /// in a diagram.
+    // The file is a fixture the rasteriser must not read.
+    #[allow(clippy::disallowed_methods)]
     #[test]
     fn local_files_named_by_an_image_are_never_read() {
         let dir = tempfile::tempdir().expect("temporary directory");
