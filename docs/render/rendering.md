@@ -18,7 +18,18 @@
 
 ## Diagram
 
-diagram は **parse 直後・layout 前に一度だけ** render し、結果を `DiagramBlock::output` に保持する。frame loop と resize は renderer を呼ばない。`merman` 0.7 の `AsciiRenderOptions` は幅オプションを持たず出力幅は内容から決まるため、resize で再 render しても結果は同一になる。将来 `merman` が幅指定に対応した場合は、resize 経路から `diagram::resolve` を呼び直すだけで対応できる。
+diagram は **parse 直後・layout 前に一度だけ** render し、結果を `DiagramBlock::output` に保持する。frame loop と resize は renderer を呼ばない。`merman` 0.9 の幅の上限（`AsciiRequest::viewport` の `max_width`）は指定せず、出力幅は内容から決まるため、resize で再 render しても結果は同一になる。幅に合わせて描かせるときは、resize 経路から `diagram::resolve` を呼び直す。
+
+- テキスト図の width profile（`MermaidWidth`）は、曖昧幅の文字を端末が何列で描くかに合わせる。既定は `Unicode`（1 列）。`Cjk`（2 列）では罫線も曖昧幅なので、`merman` が構造を ASCII で描く。どちらかは端末の設定で決まり、環境変数からは分からないので、判定せず設定で選ばせる。届くのは図の内側だけで、描画コア自身の枠・見出しの罫線は罫線文字のまま 1 列として測る。曖昧幅を 2 列で描く端末では、それらは崩れる。
+- **未対応の判定はエラーの型か、`merman` の安定した diagnostic code で行う。** エラーの文字列は版で変わるので照合しない。作者のソースに誤りがないものを「テキストでは描けない図」（warning）とし、それ以外を描画エラー（error）にする。前者は次のとおり。
+  - `AsciiError::UnsupportedDiagram` と core の `merman.parse.unsupported_diagram`: テキストで描けない図種。
+  - `AsciiError::UnsupportedFeature`: 図種の一部の構造。flowchart では、辺が他のノードの配置を横切る図がこれになる。戻りの辺があるだけでは落ちない。
+  - 出力の `projection` が `StructuredText` のもの: 図ではなく、parse した値を並べた要約になる図種（gantt・gitGraph・journey・kanban・mindmap・packet・timeline・treeView）。
+  - `RenderError::ResourceLimitExceeded`: 作業量の上限を超えた大きな図。上限は `merman` の既定（interactive profile）のまま緩めない。PR head は信頼できない入力であるため。
+  - 図がない（`NoDiagram` と `merman.parse.no_diagram_detected`）も同じ扱いにする。
+- xychart は、グラフで正確に示せない値を、グラフの上に `xDomain:`・`values:` の行として書き出す。`merman` の出力をそのまま表示する（0.9.3 で確認）。
+- **`merman` の呼び出しと、その SVG を PNG にする処理は `catch_unwind` で囲み、panic はその図だけの描画エラーにする。** 0.7 は erDiagram の非 ASCII の属性名で panic し、文書全体を表示できなかった。版を上げても panic しないとは保証されていない。捕まえても panic hook は走る（`docs/render/runtime.md` の「端末状態」）。
+- 図種は `all-diagrams` ですべて有効にする。0.9.3 で確かめたところ、図種の feature を絞ると、外した図種（pie・gantt など）が「テキストでは描けない図」ではなく、Cargo の feature を有効にするよう促す描画エラーとして出た。画像の経路でも描けなくなる。ただし architecture は、外してある Cytoscape の layout が要るので、画像にできずテキストに戻る。
 
 - 描画に失敗した diagram は diagnostic を出してソースへフォールバックし、文書の残りは通常どおり描画され、プロセスは exit 0 のまま。unsupported な diagram family は warning、構文エラーは error として分ける。
 - `--mermaid image`（rasterize の境界・大きさ・解像度）の決定事項は `docs/render/mermaid-image.md` にある。

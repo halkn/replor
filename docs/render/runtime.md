@@ -6,6 +6,8 @@ mdvu の pager（`replor` crate に置く。`docs/design/p1-core.md` の「mdvu 
 
 `TerminalGuard` が raw mode / alternate screen / カーソル表示のすべての変更を所有し、`Drop` で戻す。正常終了・エラー・panic のいずれでも端末が使える状態で終わること。端末モードを他の場所で直接変更しない。マウスキャプチャは有効にしない。
 
+描画コアは `merman` の panic を `catch_unwind` で捕まえて描画を続ける（`docs/render/rendering.md` の「Diagram」）。panic hook は捕まえる前に走る。既定の hook も stderr にメッセージを書くので、そのままでは捕まえた panic でも TUI の画面が崩れ、hook で端末を戻せば TUI が続けられなくなる。pager の panic hook は、この panic でも TUI が続くように書く。stdout の経路でも、既定の hook は文書の出力とは別に stderr へ panic のメッセージを書く。このメッセージは `RenderedSpan` の sanitize を通らない。
+
 ## レイアウトの再実行
 
 ドキュメントは起動時に一度だけ parse し、layout はリサイズと reload のときだけ再実行する。画像読込と構文ハイライトは文書単位で準備し、reload で更新する。frame ごとに layout や diagram 描画を走らせない。reload は起動時と同じ解析・リソース準備を通し、再読込した文書を開き直した文書と区別できないようにする。parse から diagram 描画までの手順は `document::build` にだけ書く。
