@@ -1,6 +1,6 @@
 use crate::diagnostic::Severity;
-use crate::diagram::MermaidMode;
 use crate::diagram::resolve;
+use crate::diagram::{MermaidMode, MermaidWidth};
 use crate::flavor;
 use crate::flavor::Flavor;
 use crate::markdown::model::{Block, DiagramBlock, Document};
@@ -8,7 +8,7 @@ use crate::source::SourceText;
 
 fn document(text: &str, mode: MermaidMode, flavor_option: Flavor) -> Document {
     let mut doc = flavor::parse(SourceText::new(text.to_string()), flavor_option);
-    resolve(&mut doc, mode, flavor_option);
+    resolve(&mut doc, mode, MermaidWidth::Unicode, flavor_option);
     doc
 }
 
@@ -110,13 +110,22 @@ fn invalid_syntax_falls_back_to_source_without_failing_the_document() {
 #[test]
 fn an_unsupported_diagram_family_falls_back_to_source() {
     let doc = document(
-        "::: mermaid\nstateDiagram-v2\n  [*] --> Still\n:::\n",
+        "::: mermaid\npie\n  \"a\" : 1\n:::\n",
         MermaidMode::Unicode,
         Flavor::AzureDevops,
     );
     let d = only_diagram(&doc);
     assert!(d.error().is_some(), "expected a fallback");
-    assert!(d.source.contains("stateDiagram-v2"));
+    assert!(d.source.contains("pie"));
+    // Nothing is wrong with the source, so it is a warning, not an error.
+    assert!(
+        doc.diagnostics
+            .iter()
+            .all(|x| x.severity == Severity::Warning),
+        "{:?}",
+        doc.diagnostics
+    );
+    assert!(!doc.diagnostics.is_empty());
 }
 
 #[test]

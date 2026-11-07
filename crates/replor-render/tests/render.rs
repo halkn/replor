@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use clap::ValueEnum;
-use replor_render::diagram::MermaidMode;
+use replor_render::diagram::{MermaidMode, MermaidWidth};
 use replor_render::flavor::Flavor;
 use replor_render::layout::icons::IconSet;
 use replor_render::layout::theme::Variant;
@@ -22,6 +22,7 @@ fn render(fixture: &str, width: &str, color: ColorChoice, extra: &[&str]) -> Str
         width: width.parse().expect("width should be a number"),
         flavor: Flavor::AzureDevops,
         mermaid: MermaidMode::Unicode,
+        mermaid_width: MermaidWidth::Unicode,
         icons: IconSet::Unicode,
         color,
         variant: Variant::Dark,
@@ -38,6 +39,8 @@ fn render(fixture: &str, width: &str, color: ColorChoice, extra: &[&str]) -> Str
             "--flavor" => options.flavor = from_flag(value),
             "--mermaid" => options.mermaid = from_flag(value),
             "--icons" => options.icons = from_flag(value),
+            // mdvu has no such flag; it stands for replor's `mermaid_width` key.
+            "--mermaid-width" => options.mermaid_width = from_flag(value),
             other => panic!("unsupported flag: {other}"),
         }
     }
@@ -190,9 +193,31 @@ golden!(mermaid_er_80, "tests/fixtures/mermaid/er.md", "80");
 golden!(mermaid_class_80, "tests/fixtures/mermaid/class.md", "80");
 golden!(mermaid_state_80, "tests/fixtures/mermaid/state.md", "80");
 golden!(
+    mermaid_er_japanese_80,
+    "tests/fixtures/mermaid/er-japanese.md",
+    "80"
+);
+golden_with!(
+    mermaid_no_text_layout_80,
+    "tests/fixtures/mermaid/no-text-layout.md",
+    "80",
+    ["--flavor", "gfm"]
+);
+golden!(
+    mermaid_structured_text_80,
+    "tests/fixtures/mermaid/structured-text.md",
+    "80"
+);
+golden!(
     mermaid_japanese_80,
     "tests/fixtures/mermaid/japanese.md",
     "80"
+);
+golden_with!(
+    mermaid_japanese_cjk_80,
+    "tests/fixtures/mermaid/japanese.md",
+    "80",
+    ["--mermaid-width", "cjk"]
 );
 golden!(
     mermaid_invalid_80,

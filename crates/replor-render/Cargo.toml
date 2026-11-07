@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-merman = { version = "0.7.0", default-features = false, features = ["ascii", "render"] }
+merman = { version = "0.9.3", default-features = false, features = ["ascii", "svg", "all-diagrams"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
 resvg = { version = "0.46.0", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
 syntect = { version = "5.3.0", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy"] }

@@ -132,6 +132,7 @@ mod tests {
                 "text\n".into(),
                 Flavor::Gfm,
                 crate::diagram::MermaidMode::Off,
+                crate::diagram::MermaidWidth::Unicode,
             ),
             InlineContext::default(),
         );
@@ -149,8 +150,12 @@ mod tests {
     #[test]
     fn controls_are_visible_without_changing_source_ranges_or_tab_columns() {
         let text = "```text\n\x1b\t日\n👩‍💻\tend\n```\n";
-        let document =
-            crate::document::build(text.into(), Flavor::Gfm, crate::diagram::MermaidMode::Off);
+        let document = crate::document::build(
+            text.into(),
+            Flavor::Gfm,
+            crate::diagram::MermaidMode::Off,
+            crate::diagram::MermaidWidth::Unicode,
+        );
         let prepared = PreparedDocument::new(document, InlineContext::default());
         let rendered = layout_document(&prepared, LayoutOptions::new(80));
         assert_eq!(prepared.document().source.as_str(), text);
@@ -183,6 +188,7 @@ mod tests {
                 "![a](a.png)\n".into(),
                 Flavor::Gfm,
                 crate::diagram::MermaidMode::Off,
+                crate::diagram::MermaidWidth::Unicode,
             )
         };
         let prepared = PreparedDocument::new(document(), context.clone());
