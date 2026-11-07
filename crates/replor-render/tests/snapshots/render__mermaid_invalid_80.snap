@@ -8,8 +8,8 @@ expression: "plain(\"tests/fixtures/mermaid/invalid.md\", \"80\")"
 The diagram below cannot be parsed and falls back to its source.
 
 ╭─ Mermaid render error ────────────────────────────────────────────────────────
-│ Diagram parse error (flowchart-v2): UnrecognizedToken { token: (19,
-│ Arrow(LinkToken { end: "-->", edge_type: "arrow_poin…
+│ Diagram parse error (flowchart-v2): unexpected edge operator; expected node
+│ identifier, edge label
 ├───────────────────────────────────────────────────────────────────────────────
 │ graph LR
 │   A -->

@@ -1,0 +1,21 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain_with(\"tests/fixtures/mermaid/no-text-layout.md\", \"80\", &\n[\"--flavor\", \"gfm\"])"
+---
+# No text layout
+────────────────────────────────────────────────────────────────────────────────
+
+A flowchart that draws as a picture but has no text layout keeps its source.
+
+╭─ Mermaid diagram not supported as text ───────────────────────────────────────
+│ ASCII rendering does not support `routes crossing reserved graph geometry` for
+│ `flowchart` yet
+├───────────────────────────────────────────────────────────────────────────────
+│ flowchart LR
+│   A[Start] --> B{Review?}
+│   B -->|ok| C[Merge]
+│   B -->|ng| D[Fix]
+│   D --> B
+╰───────────────────────────────────────────────────────────────────────────────
+
+The paragraph after the diagram still renders.

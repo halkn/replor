@@ -29,13 +29,34 @@ pub enum MermaidMode {
     Off,
 }
 
-pub fn resolve(document: &mut Document, mode: MermaidMode, flavor: Flavor) {
-    let renderer = MermanRenderer;
+/// How many columns the terminal gives East Asian Ambiguous characters, which
+/// text diagrams must know to keep their frames aligned. `Cjk` is for
+/// terminals that draw them two columns wide; box drawing characters are
+/// ambiguous too, so `merman` falls back to ASCII structure under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum MermaidWidth {
+    #[default]
+    Unicode,
+    Cjk,
+}
+
+pub fn resolve(document: &mut Document, mode: MermaidMode, width: MermaidWidth, flavor: Flavor) {
+    resolve_with(document, &MermanRenderer::default(), mode, width, flavor);
+}
+
+fn resolve_with(
+    document: &mut Document,
+    renderer: &impl DiagramRenderer,
+    mode: MermaidMode,
+    width: MermaidWidth,
+    flavor: Flavor,
+) {
     let mut diagnostics = Vec::new();
     resolve_blocks(
         &mut document.blocks,
-        &renderer,
+        renderer,
         mode,
+        width,
         flavor,
         &mut diagnostics,
     );
@@ -46,6 +67,7 @@ fn resolve_blocks(
     blocks: &mut [Block],
     renderer: &impl DiagramRenderer,
     mode: MermaidMode,
+    width: MermaidWidth,
     flavor: Flavor,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -64,15 +86,17 @@ fn resolve_blocks(
                 MermaidMode::Image => match renderer.render_png(&diagram.source) {
                     Ok(png) => diagram.output = DiagramOutput::Image(png),
                     // Text may still draw it, and reports the error if not.
-                    Err(_) => render_text(diagram, renderer, MermaidMode::Unicode, diagnostics),
+                    Err(_) => {
+                        render_text(diagram, renderer, MermaidMode::Unicode, width, diagnostics)
+                    }
                 },
                 MermaidMode::Unicode | MermaidMode::Ascii => {
-                    render_text(diagram, renderer, mode, diagnostics)
+                    render_text(diagram, renderer, mode, width, diagnostics)
                 }
             }
         }
         for children in block.children_mut() {
-            resolve_blocks(children, renderer, mode, flavor, diagnostics);
+            resolve_blocks(children, renderer, mode, width, flavor, diagnostics);
         }
     }
 }
@@ -81,9 +105,10 @@ fn render_text(
     diagram: &mut DiagramBlock,
     renderer: &impl DiagramRenderer,
     mode: MermaidMode,
+    width: MermaidWidth,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    match renderer.render(&diagram.source, &DiagramRenderOptions { mode }) {
+    match renderer.render(&diagram.source, &DiagramRenderOptions { mode, width }) {
         Ok(rendered) => diagram.output = DiagramOutput::Text(rendered.lines),
         Err(error) => {
             // A failed diagram falls back to its source, never failing the document.

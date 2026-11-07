@@ -15,7 +15,7 @@ pub mod text;
 
 use std::path::PathBuf;
 
-use diagram::MermaidMode;
+use diagram::{MermaidMode, MermaidWidth};
 use flavor::Flavor;
 use layout::LayoutOptions;
 use layout::icons::IconSet;
@@ -33,6 +33,7 @@ pub struct RenderOptions {
     pub width: usize,
     pub flavor: Flavor,
     pub mermaid: MermaidMode,
+    pub mermaid_width: MermaidWidth,
     pub icons: IconSet,
     pub color: ColorChoice,
     pub variant: Variant,
@@ -51,7 +52,7 @@ pub fn render_to_string(text: String, options: &RenderOptions) -> error::Result<
         MermaidMode::Image => MermaidMode::Unicode,
         mode => mode,
     };
-    let document = document::build(text, options.flavor, mermaid);
+    let document = document::build(text, options.flavor, mermaid, options.mermaid_width);
     let inline = InlineContext {
         mermaid,
         content_root: None,
