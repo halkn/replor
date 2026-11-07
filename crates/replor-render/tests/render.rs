@@ -16,6 +16,9 @@ use replor_render::layout::theme::Variant;
 use replor_render::output::ColorChoice;
 use replor_render::{RenderOptions, render_to_string};
 
+// The fixture is the test's input, read by the test rather than the render
+// core.
+#[allow(clippy::disallowed_methods)]
 fn render(fixture: &str, width: &str, color: ColorChoice, extra: &[&str]) -> String {
     let mut options = RenderOptions {
         base_dir: Path::new(fixture).parent().map(Path::to_path_buf),

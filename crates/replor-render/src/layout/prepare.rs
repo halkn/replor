@@ -75,11 +75,7 @@ fn prepare(
             }
             Block::Paragraph(block) if inline.images.is_some() => {
                 if let [Inline::Image(image)] = block.content.as_slice()
-                    && let Some(asset) = crate::image::load(
-                        &image.dest,
-                        inline.base_dir.as_deref(),
-                        inline.content_root.as_deref(),
-                    )
+                    && let Some(asset) = crate::image::load(&image.dest, inline.source.as_ref())
                 {
                     images.insert(key(block.range), asset);
                 }
@@ -124,6 +120,7 @@ mod tests {
     use crate::flavor::Flavor;
     use crate::image::{CellSize, ImageSupport, Protocol};
     use crate::layout::{LayoutOptions, layout_document};
+    use crate::snapshot::memory::MemorySnapshot;
 
     #[test]
     fn a_code_block_preparation_missed_is_still_laid_out() {
@@ -168,12 +165,11 @@ mod tests {
 
     #[test]
     fn relayout_reuses_image_data_and_reload_refreshes_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("a.png");
+        let snapshot = MemorySnapshot::new("");
         let bytes = include_bytes!("../../tests/fixtures/gfm/.attachments/architecture.png");
-        std::fs::write(&path, bytes).unwrap();
+        snapshot.write("a.png", bytes.to_vec());
         let context = InlineContext {
-            base_dir: Some(dir.path().into()),
+            source: Some(snapshot.source("doc.md")),
             images: Some(ImageSupport {
                 protocol: Protocol::Kitty,
                 cell: CellSize {
@@ -194,7 +190,7 @@ mod tests {
         let prepared = PreparedDocument::new(document(), context.clone());
         let wide = layout_document(&prepared, LayoutOptions::new(80));
         // A resize must not reopen files; changes become visible on reload.
-        std::fs::write(&path, b"invalid").unwrap();
+        snapshot.write("a.png", b"invalid".to_vec());
         let narrow = layout_document(&prepared, LayoutOptions::new(20));
         let wide = wide.lines[0].image.as_ref().unwrap();
         let narrow = narrow.lines[0].image.as_ref().unwrap();

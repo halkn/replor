@@ -7,12 +7,14 @@
 pub mod dimensions;
 pub mod protocol;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use dimensions::{Format, Pixels};
 pub use protocol::Protocol;
+
+use crate::snapshot::{DocumentSource, SnapshotPath};
 
 /// Largest file that will be sent to the terminal. A payload is base64 encoded
 /// and travels over the tty, so an unbounded read would stall the terminal.
@@ -250,31 +252,21 @@ pub fn protocol_from_env(env: &Env) -> Option<Protocol> {
 /// Reads the image `dest` points at, or `None` when any rule below is not met.
 /// A rejected image keeps its text placeholder; it is never an error and never
 /// changes the exit code.
-pub fn load(
-    dest: &str,
-    base_dir: Option<&Path>,
-    content_root: Option<&Path>,
-) -> Option<Rc<ImageAsset>> {
-    // A document read from stdin has no directory to confine reads to.
-    let base = base_dir?;
-    let path = local_path(dest)?;
-    let expected = extension_format(&path)?;
-    let path = confined(base, content_root, &path)?;
-
-    let metadata = std::fs::metadata(&path).ok()?;
-    if !metadata.is_file() || metadata.len() > MAX_BYTES {
+///
+/// The snapshot keeps reads inside its root; the content root is checked here,
+/// on the path the snapshot resolved, so a symlink cannot leave it either.
+pub fn load(dest: &str, source: Option<&DocumentSource>) -> Option<Rc<ImageAsset>> {
+    // A document read from stdin has no snapshot to read from.
+    let source = source?;
+    let dest = local_path(dest)?;
+    let expected = extension_format(Path::new(&dest))?;
+    let content_root = source.content_root();
+    let path = SnapshotPath::from_reference(source.path(), content_root, &dest).ok()?;
+    let resolved = source.snapshot().resolve(&path).ok()?;
+    if !resolved.starts_with(content_root) {
         return None;
     }
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    std::fs::File::open(&path)
-        .ok()?
-        .take(MAX_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    if bytes.len() as u64 > MAX_BYTES {
-        return None;
-    }
+    let bytes = source.snapshot().read(&resolved, MAX_BYTES).ok()?;
     // A file whose contents disagree with its name is not sent on: the
     // terminal, not `mdvu`, would be the one to decode it.
     if dimensions::format_of(&bytes) != Some(expected) {
@@ -286,11 +278,11 @@ pub fn load(
 
 /// A local path, or `None` for anything with a URL scheme. Remote images are
 /// not fetched: `mdvu` makes no network requests.
-fn local_path(dest: &str) -> Option<PathBuf> {
+fn local_path(dest: &str) -> Option<String> {
     if dest.is_empty() || has_scheme(dest) {
         return None;
     }
-    Some(PathBuf::from(percent_decoded(dest)))
+    Some(percent_decoded(dest))
 }
 
 /// `scheme:` per RFC 3986, requiring at least two characters so a Windows drive
@@ -343,52 +335,6 @@ fn extension_format(path: &Path) -> Option<Format> {
         .iter()
         .find(|(name, _)| *name == extension)
         .map(|(_, format)| *format)
-}
-
-/// The content root for a document, or `None` outside a repository.
-///
-/// A wiki keeps its attachments at the root rather than beside each page, so
-/// the document's own directory is too narrow a boundary. The root is the
-/// nearest ancestor holding a `.git` entry — a directory in a plain clone, a
-/// file in a worktree or submodule, so the kind is not checked. `.attachments`
-/// is not used as the marker: one repository can hold several of them, and the
-/// nearest one is not necessarily the one a page points at.
-pub fn content_root(base_dir: &Path) -> Option<PathBuf> {
-    let base = directory(base_dir).canonicalize().ok()?;
-    base.ancestors()
-        .find(|dir| dir.join(".git").try_exists().unwrap_or(false))
-        .map(Path::to_path_buf)
-}
-
-/// The absolute path, if and only if it stays inside the boundary: the content
-/// root when there is one, the document's own directory otherwise. Every side
-/// is canonicalised, so `../` and a symlink pointing outside are caught the
-/// same way. The reader opened one document; a document cannot make `mdvu` read
-/// files elsewhere on the machine.
-///
-/// A leading `/` is read as a path from the boundary, which is how Azure DevOps
-/// and GitHub both resolve it. It is never a path from the filesystem root.
-fn confined(base: &Path, content_root: Option<&Path>, path: &Path) -> Option<PathBuf> {
-    let base = directory(base).canonicalize().ok()?;
-    let boundary = match content_root {
-        Some(root) => root.canonicalize().ok()?,
-        None => base.clone(),
-    };
-    let joined = match path.strip_prefix("/") {
-        Ok(rest) => boundary.join(rest),
-        Err(_) => base.join(path),
-    };
-    let resolved = joined.canonicalize().ok()?;
-    resolved.starts_with(&boundary).then_some(resolved)
-}
-
-/// `mdvu a.md` leaves the document's parent as an empty path, which names the
-/// working directory but does not canonicalise.
-fn directory(base_dir: &Path) -> &Path {
-    match base_dir.as_os_str().is_empty() {
-        true => Path::new("."),
-        false => base_dir,
-    }
 }
 
 /// Cell size in pixels, falling back when the terminal reports none.
@@ -446,7 +392,8 @@ fn fit(pixels: Pixels, cell: CellSize, max_cols: usize) -> (usize, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use crate::snapshot::memory::MemorySnapshot;
+    use std::sync::Arc;
 
     fn png(width: u32, height: u32) -> Vec<u8> {
         let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
@@ -469,12 +416,21 @@ mod tests {
 
     fn resolve(
         dest: &str,
-        base_dir: Option<&Path>,
-        content_root: Option<&Path>,
+        source: Option<&DocumentSource>,
         support: ImageSupport,
         max_cols: usize,
     ) -> Option<Rc<Placement>> {
-        load(dest, base_dir, content_root)?.place(support, max_cols)
+        load(dest, source)?.place(support, max_cols)
+    }
+
+    /// A wiki keeps its attachments beside the pages rather than under them,
+    /// so a page one directory down reaches them with `../`. `outside.png`
+    /// sits above the wiki, where nothing in the document may reach.
+    fn wiki() -> Arc<MemorySnapshot> {
+        let snapshot = MemorySnapshot::new("wiki");
+        snapshot.write("wiki/.attachments/architecture.png", png(200, 100));
+        snapshot.write("outside.png", png(10, 10));
+        snapshot
     }
 
     const SUPPORT: ImageSupport = ImageSupport {
@@ -521,73 +477,24 @@ mod tests {
         assert!(from_png(png(200, 100), SUPPORT, 0, 100).is_none());
     }
 
-    fn write(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
-        let path = dir.join(name);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).expect("creating the fixture directory");
-        }
-        let mut file = std::fs::File::create(&path).expect("creating the fixture");
-        file.write_all(bytes).expect("writing the fixture");
-        path
-    }
-
     #[test]
-    fn an_image_below_the_base_directory_resolves() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        write(dir.path(), ".attachments/a.png", &png(200, 100));
-        let placement = resolve(".attachments/a.png", Some(dir.path()), None, SUPPORT, 80)
+    fn an_image_beside_the_document_resolves() {
+        let snapshot = MemorySnapshot::new("");
+        snapshot.write("docs/.attachments/a.png", png(200, 100));
+        let source = snapshot.source("docs/page.md");
+        let placement = resolve(".attachments/a.png", Some(&source), SUPPORT, 80)
             .expect("the image should resolve");
         assert_eq!((placement.cols, placement.rows), (20, 5));
         assert!(placement.escape().starts_with("\x1b_G"));
     }
 
     #[test]
-    fn a_path_escaping_the_base_directory_is_rejected() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        let outside = write(dir.path(), "outside.png", &png(10, 10));
-        let base = dir.path().join("doc");
-        std::fs::create_dir_all(&base).expect("creating the base directory");
-        assert!(resolve("../outside.png", Some(&base), None, SUPPORT, 80).is_none());
-        assert!(resolve(outside.to_str().unwrap(), Some(&base), None, SUPPORT, 80).is_none());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_symlink_out_of_the_base_directory_is_rejected() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        let outside = write(dir.path(), "outside.png", &png(10, 10));
-        let base = dir.path().join("doc");
-        std::fs::create_dir_all(&base).expect("creating the base directory");
-        std::os::unix::fs::symlink(&outside, base.join("link.png")).expect("creating the symlink");
-        assert!(resolve("link.png", Some(&base), None, SUPPORT, 80).is_none());
-    }
-
-    /// A wiki keeps its attachments beside the pages rather than under them, so
-    /// a page one directory down reaches them with `../`. `outside.png` sits
-    /// above the wiki, where nothing in the document may reach.
-    fn wiki() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        std::fs::create_dir_all(dir.path().join("wiki/.git"))
-            .expect("creating the repository marker");
-        std::fs::create_dir_all(dir.path().join("wiki/design")).expect("creating the page dir");
-        write(
-            dir.path(),
-            "wiki/.attachments/architecture.png",
-            &png(200, 100),
-        );
-        write(dir.path(), "outside.png", &png(10, 10));
-        dir
-    }
-
-    #[test]
     fn an_image_above_the_document_resolves_within_the_content_root() {
-        let dir = wiki();
-        let root = dir.path().join("wiki");
+        let source = wiki().source("wiki/design/page.md");
         assert!(
             resolve(
                 "../.attachments/architecture.png",
-                Some(&root.join("design")),
-                Some(&root),
+                Some(&source),
                 SUPPORT,
                 80
             )
@@ -597,162 +504,64 @@ mod tests {
 
     #[test]
     fn a_root_relative_path_resolves_from_the_content_root() {
-        let dir = wiki();
-        let root = dir.path().join("wiki");
-        assert!(
-            resolve(
-                "/.attachments/architecture.png",
-                Some(&root.join("design")),
-                Some(&root),
-                SUPPORT,
-                80
-            )
-            .is_some()
-        );
+        let source = wiki().source("wiki/design/page.md");
+        assert!(resolve("/.attachments/architecture.png", Some(&source), SUPPORT, 80).is_some());
     }
 
     #[test]
     fn a_path_escaping_the_content_root_is_rejected() {
-        let dir = wiki();
-        let root = dir.path().join("wiki");
-        let base = root.join("design");
-        assert!(resolve("../../outside.png", Some(&base), Some(&root), SUPPORT, 80).is_none());
-        assert!(resolve("/../outside.png", Some(&base), Some(&root), SUPPORT, 80).is_none());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_symlink_out_of_the_content_root_is_rejected() {
-        let dir = wiki();
-        let root = dir.path().join("wiki");
-        std::os::unix::fs::symlink(dir.path().join("outside.png"), root.join("link.png"))
-            .expect("creating the symlink");
-        assert!(
-            resolve(
-                "../link.png",
-                Some(&root.join("design")),
-                Some(&root),
-                SUPPORT,
-                80
-            )
-            .is_none()
-        );
-    }
-
-    /// Without a content root the document's own directory is still the
-    /// boundary, and a root-relative path is read from there.
-    #[test]
-    fn a_root_relative_path_without_a_content_root_stays_inside_the_document_directory() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        write(dir.path(), ".attachments/a.png", &png(10, 10));
-        assert!(resolve("/.attachments/a.png", Some(dir.path()), None, SUPPORT, 80).is_some());
-        assert!(resolve("/../a.png", Some(dir.path()), None, SUPPORT, 80).is_none());
-    }
-
-    #[test]
-    fn the_content_root_is_the_nearest_ancestor_holding_a_git_entry() {
-        let dir = wiki();
-        let root = dir
-            .path()
-            .join("wiki")
-            .canonicalize()
-            .expect("canonical root");
-        assert_eq!(content_root(&root.join("design")).as_deref(), Some(&*root));
-
-        // A nested repository owns the pages below it.
-        let nested = root.join("design/vendored");
-        std::fs::create_dir_all(nested.join(".git")).expect("creating the nested marker");
-        assert_eq!(content_root(&nested).as_deref(), Some(&*nested));
-    }
-
-    /// A worktree and a submodule record `.git` as a file rather than a
-    /// directory, and both are ordinary checkouts to read from.
-    #[test]
-    fn a_git_file_marks_the_content_root() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        write(dir.path(), ".git", b"gitdir: /elsewhere\n");
-        let root = dir.path().canonicalize().expect("canonical root");
-        assert_eq!(content_root(&root).as_deref(), Some(&*root));
-    }
-
-    #[test]
-    fn a_directory_outside_a_repository_has_no_content_root() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        assert_eq!(content_root(dir.path()), None);
-    }
-
-    /// `mdvu a.md` leaves the parent as an empty path, which still names the
-    /// working directory.
-    #[test]
-    fn an_empty_base_directory_means_the_working_directory() {
-        assert_eq!(directory(Path::new("")), Path::new("."));
-        assert_eq!(directory(Path::new("docs")), Path::new("docs"));
+        let source = wiki().source("wiki/design/page.md");
+        assert!(resolve("../../outside.png", Some(&source), SUPPORT, 80).is_none());
+        assert!(resolve("/../outside.png", Some(&source), SUPPORT, 80).is_none());
+        assert!(resolve("../../../outside.png", Some(&source), SUPPORT, 80).is_none());
     }
 
     #[test]
     fn remote_and_data_destinations_are_never_fetched() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        assert!(
-            resolve(
-                "https://example.com/a.png",
-                Some(dir.path()),
-                None,
-                SUPPORT,
-                80
-            )
-            .is_none()
-        );
-        assert!(
-            resolve(
-                "data:image/png;base64,AAAA",
-                Some(dir.path()),
-                None,
-                SUPPORT,
-                80
-            )
-            .is_none()
-        );
+        let source = MemorySnapshot::new("").source("a.md");
+        assert!(resolve("https://example.com/a.png", Some(&source), SUPPORT, 80).is_none());
+        assert!(resolve("data:image/png;base64,AAAA", Some(&source), SUPPORT, 80).is_none());
     }
 
     #[test]
     fn a_document_from_stdin_has_nothing_to_resolve_against() {
-        assert!(resolve("a.png", None, None, SUPPORT, 80).is_none());
+        assert!(resolve("a.png", None, SUPPORT, 80).is_none());
     }
 
     #[test]
     fn an_unsupported_extension_is_rejected() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        write(dir.path(), "a.svg", b"<svg></svg>");
-        assert!(resolve("a.svg", Some(dir.path()), None, SUPPORT, 80).is_none());
+        let snapshot = MemorySnapshot::new("");
+        snapshot.write("a.svg", b"<svg></svg>".to_vec());
+        assert!(resolve("a.svg", Some(&snapshot.source("a.md")), SUPPORT, 80).is_none());
     }
 
     #[test]
     fn contents_disagreeing_with_the_extension_are_rejected() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        write(dir.path(), "a.png", b"GIF89a\x01\x00\x01\x00\x00\x00\x00");
-        assert!(resolve("a.png", Some(dir.path()), None, SUPPORT, 80).is_none());
+        let snapshot = MemorySnapshot::new("");
+        snapshot.write("a.png", b"GIF89a\x01\x00\x01\x00\x00\x00\x00".to_vec());
+        assert!(resolve("a.png", Some(&snapshot.source("a.md")), SUPPORT, 80).is_none());
     }
 
     #[test]
     fn an_oversized_file_is_rejected() {
-        let dir = tempfile::tempdir().expect("temporary directory");
+        let snapshot = MemorySnapshot::new("");
         let mut bytes = png(10, 10);
         bytes.resize(MAX_BYTES as usize + 1, 0);
-        write(dir.path(), "big.png", &bytes);
-        assert!(resolve("big.png", Some(dir.path()), None, SUPPORT, 80).is_none());
+        snapshot.write("big.png", bytes);
+        assert!(resolve("big.png", Some(&snapshot.source("a.md")), SUPPORT, 80).is_none());
     }
 
     #[test]
     fn a_percent_encoded_name_resolves() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        write(dir.path(), "a b.png", &png(10, 10));
-        assert!(resolve("a%20b.png", Some(dir.path()), None, SUPPORT, 80).is_some());
+        let snapshot = MemorySnapshot::new("");
+        snapshot.write("a b.png", png(10, 10));
+        assert!(resolve("a%20b.png", Some(&snapshot.source("a.md")), SUPPORT, 80).is_some());
     }
 
     #[test]
     fn a_missing_file_is_rejected() {
-        let dir = tempfile::tempdir().expect("temporary directory");
-        assert!(resolve("nope.png", Some(dir.path()), None, SUPPORT, 80).is_none());
+        let source = MemorySnapshot::new("").source("a.md");
+        assert!(resolve("nope.png", Some(&source), SUPPORT, 80).is_none());
     }
 
     #[test]

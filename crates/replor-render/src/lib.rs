@@ -10,6 +10,7 @@ pub mod image;
 pub mod layout;
 pub mod markdown;
 pub mod output;
+pub mod snapshot;
 pub mod source;
 pub mod text;
 
@@ -43,7 +44,7 @@ pub struct RenderOptions {
 
 /// 文書を stdout と同じ経路で描き、出力の文字列を返す。mdvu の `main.rs` の
 /// stdout の経路を、画像を出さない場合に限って同じ順で呼ぶ。`text` は decode
-/// 済みの文字列で、BOM は呼び出し側が外す（mdvu の `input::decode`）。
+/// 済みの文字列で、BOM は呼び出し側が外す（`document::decode`）。
 pub fn render_to_string(text: String, options: &RenderOptions) -> error::Result<String> {
     let theme = Theme::new(options.variant).with_color(options.color);
     // 画像を出さないので、mdvu の `Cli::mermaid_mode` と同じく `Image` は
@@ -55,7 +56,7 @@ pub fn render_to_string(text: String, options: &RenderOptions) -> error::Result<
     let document = document::build(text, options.flavor, mermaid, options.mermaid_width);
     let inline = InlineContext {
         mermaid,
-        content_root: None,
+        source: None,
         base_dir: options.base_dir.clone(),
         highlight: options.highlight,
         images: None,
