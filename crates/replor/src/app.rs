@@ -192,22 +192,15 @@ impl App {
                 return Outcome::Replaced;
             }
             Command::TreeMove(delta) => self.tree.move_by(delta),
-            Command::TreeExpand => self.tree.expand(),
+            Command::TreeExpand => {
+                let opened = self.tree.expand();
+                return self.show(opened);
+            }
             Command::TreeCollapse => self.tree.collapse(),
-            Command::TreeOpen => match self.tree.open() {
-                Opened::File(entry) if entry.kind == EntryKind::Submodule => {
-                    self.content =
-                        preview::notice("A submodule is another repository.", &self.options);
-                    self.opened = None;
-                    self.lay_out_fresh();
-                    return Outcome::Replaced;
-                }
-                Opened::File(entry) => {
-                    self.open(&entry.path);
-                    return Outcome::Replaced;
-                }
-                Opened::Toggled | Opened::Nothing => {}
-            },
+            Command::TreeOpen => {
+                let opened = self.tree.open();
+                return self.show(opened);
+            }
             Command::Preview(input) => {
                 if !self.apply(input) {
                     return Outcome::Quit;
@@ -216,6 +209,23 @@ impl App {
             Command::Ignored => {}
         }
         Outcome::Continue
+    }
+
+    /// Puts a file the tree handed over into the preview.
+    fn show(&mut self, opened: Opened) -> Outcome {
+        match opened {
+            Opened::File(entry) if entry.kind == EntryKind::Submodule => {
+                self.content = preview::notice("A submodule is another repository.", &self.options);
+                self.opened = None;
+                self.lay_out_fresh();
+                Outcome::Replaced
+            }
+            Opened::File(entry) => {
+                self.open(&entry.path);
+                Outcome::Replaced
+            }
+            Opened::Toggled | Opened::Nothing => Outcome::Continue,
+        }
     }
 
     pub fn resize(&mut self, size: Rect) {
@@ -632,6 +642,16 @@ mod tests {
         assert_eq!(app.focus(), Focus::Preview);
         app.key(parse("G"));
         assert_eq!(app.key(parse("q")), Outcome::Quit);
+    }
+
+    #[test]
+    fn l_opens_a_file_in_the_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        write(&dir.path().join("a.md"), "# Alpha\n");
+        let mut app = app(dir.path(), "");
+        assert_eq!(app.key(parse("l")), Outcome::Replaced);
+        assert!(text(&app).contains("Alpha"), "{}", text(&app));
     }
 
     #[test]

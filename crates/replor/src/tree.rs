@@ -93,14 +93,20 @@ impl Tree {
         }
     }
 
-    /// Expands the selected directory. Anything else is left as it is.
-    pub fn expand(&mut self) {
+    /// Expands the selected directory, or hands over the selected file as
+    /// `open` does. An expanded directory stays as it is.
+    pub fn expand(&mut self) -> Opened {
         let Some(row) = self.rows.get(self.selected) else {
-            return;
+            return Opened::Nothing;
         };
-        if row.entry.kind == EntryKind::Directory && !row.expanded {
-            self.expanded.insert(row.entry.path.clone());
-            self.rebuild();
+        match (row.entry.kind, row.expanded) {
+            (EntryKind::Directory, true) => Opened::Nothing,
+            (EntryKind::Directory, false) => {
+                self.expanded.insert(row.entry.path.clone());
+                self.rebuild();
+                Opened::Toggled
+            }
+            _ => Opened::File(row.entry.clone()),
         }
     }
 
@@ -298,11 +304,15 @@ mod tests {
         // At the top level there is nowhere further up.
         tree.collapse();
         assert_eq!(tree.selected(), 0);
-        // `l` on a file does nothing.
-        tree.move_by(2);
-        let before = names(&tree);
+        // `l` on an open directory leaves it open; on a file it opens the file.
         tree.expand();
-        assert_eq!(names(&tree), before);
+        assert_eq!(tree.expand(), Opened::Nothing);
+        assert!(names(&tree).contains(&"  guide".to_string()));
+        tree.move_by(2);
+        let Opened::File(entry) = tree.expand() else {
+            panic!("expected a file");
+        };
+        assert_eq!(entry.path.as_str(), "docs/index.md");
     }
 
     #[test]

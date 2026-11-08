@@ -40,7 +40,7 @@ pub const ENTRIES: &[Entry] = &[
     },
     Entry {
         keys: &["l"],
-        action: "Tree: expand a directory",
+        action: "Tree: expand a directory, or open a file",
         pane: Pane::Tree,
     },
     Entry {
