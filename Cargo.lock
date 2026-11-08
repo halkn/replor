@@ -2495,6 +2495,8 @@ dependencies = [
  "merman",
  "pulldown-cmark",
  "resvg",
+ "serde",
+ "serde_json",
  "syntect",
  "tempfile",
  "thiserror",

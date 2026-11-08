@@ -18,6 +18,7 @@
 //! kept whole and its line overflows (追い込み) rather than breaking at a
 //! forbidden position.
 
+use crate::navigation::LinkKey;
 use std::rc::Rc;
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -71,6 +72,7 @@ struct Cell {
     width: usize,
     /// Shared so a long link does not allocate its URL once per grapheme.
     link: Option<Rc<str>>,
+    key: Option<LinkKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +167,7 @@ fn cells(spans: &[RenderedSpan]) -> Vec<Cell> {
                 role: span.role,
                 width: display_width(g),
                 link: link.clone(),
+                key: span.key,
             });
         }
     }
@@ -283,12 +286,15 @@ fn merge(cells: Vec<Cell>) -> Vec<RenderedSpan> {
     for cell in cells {
         match spans.last_mut() {
             Some(last)
-                if last.role == cell.role && last.link.as_deref() == cell.link.as_deref() =>
+                if last.role == cell.role
+                    && last.link.as_deref() == cell.link.as_deref()
+                    && last.key == cell.key =>
             {
                 last.text.push_str(&cell.text)
             }
             _ => {
-                let span = RenderedSpan::new(cell.text, cell.role);
+                let mut span = RenderedSpan::new(cell.text, cell.role);
+                span.key = cell.key;
                 spans.push(match cell.link {
                     Some(link) => span.with_link(link.as_ref()),
                     None => span,

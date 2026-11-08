@@ -105,10 +105,10 @@ fn toc(t: &TocBlock, width: usize, out: &mut Vec<RenderedLine>) {
         let marker = RenderedSpan::new(format!("{indent}• "), StyleRole::ListMarker);
         let available = width.saturating_sub(display_width(&marker.text)).max(1);
         let text = wrap_spans(
-            &[RenderedSpan::new(
-                crate::text::spaced(&entry.text),
-                StyleRole::Link,
-            )],
+            &[
+                RenderedSpan::new(crate::text::spaced(&entry.text), StyleRole::Link)
+                    .with_key(crate::navigation::LinkKey::Toc(entry.range.byte_start)),
+            ],
             available,
         );
         for (index, mut spans) in text.into_iter().enumerate() {

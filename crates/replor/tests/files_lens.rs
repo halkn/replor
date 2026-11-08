@@ -84,3 +84,46 @@ fn the_repository_opens_at_docs_and_shows_the_concept_with_its_diagram() {
     let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
     assert_eq!(app.key(key), Outcome::Quit);
 }
+
+/// The S1 link in the P0 results table leads to a Japanese heading, and Back
+/// returns to the table.
+#[test]
+fn the_p0_results_link_reaches_its_japanese_heading_and_back() {
+    let start = start::resolve(None, repository()).unwrap();
+    let options = Options {
+        flavor: Flavor::AzureDevops,
+        mermaid: MermaidMode::Unicode,
+        mermaid_width: MermaidWidth::Unicode,
+        highlight: false,
+        images: None,
+        icons: IconSet::Unicode,
+    };
+    let mut app = App::new(
+        Arc::new(start.snapshot),
+        start.top,
+        options,
+        Theme::new(Variant::Dark),
+        Rect::new(0, 0, 140, 40),
+    );
+    app.open(&SnapshotPath::new("docs/spike/p0-results.md").unwrap());
+    let press = |app: &mut App, code| app.key(KeyEvent::new(code, KeyModifiers::NONE));
+    press(&mut app, KeyCode::Tab);
+    let mut found = false;
+    for _ in 0..20 {
+        press(&mut app, KeyCode::Char('f'));
+        let bar = app
+            .link_bar()
+            .map(|bar| bar.text.clone())
+            .unwrap_or_default();
+        if bar == "#s1-普段の環境で画像を表示できるか" {
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "the S1 link should be selectable");
+    let before = app.top_line();
+    press(&mut app, KeyCode::Enter);
+    assert_eq!(app.top_line(), Some(21), "{:?}", app.state().status);
+    press(&mut app, KeyCode::Char('['));
+    assert_eq!(app.top_line(), before);
+}

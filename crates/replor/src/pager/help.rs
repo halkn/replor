@@ -119,6 +119,21 @@ pub const ENTRIES: &[Entry] = &[
         pane: Pane::Preview,
     },
     Entry {
+        keys: &["f", "F"],
+        action: "Select the next / previous link",
+        pane: Pane::Preview,
+    },
+    Entry {
+        keys: &["Enter"],
+        action: "Follow the selected link",
+        pane: Pane::Preview,
+    },
+    Entry {
+        keys: &["[", "]"],
+        action: "Back / forward through followed links",
+        pane: Pane::Both,
+    },
+    Entry {
         keys: &["r"],
         action: "Reload the tree and the open file",
         pane: Pane::Both,

@@ -9,6 +9,7 @@ pub mod flavor;
 pub mod image;
 pub mod layout;
 pub mod markdown;
+pub mod navigation;
 pub mod output;
 pub mod snapshot;
 pub mod source;

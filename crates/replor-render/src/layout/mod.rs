@@ -14,6 +14,7 @@ pub mod wrap;
 pub use document::layout_document;
 pub use prepare::PreparedDocument;
 
+use crate::navigation::LinkKey;
 use std::rc::Rc;
 
 use crate::diagnostic::Diagnostic;
@@ -77,6 +78,9 @@ pub struct RenderedSpan {
     /// Absolute URL this run points at, when a backend can make it clickable.
     /// Only the ANSI stdout backend uses it; the pager renders plain styled text.
     pub link: Option<String>,
+    /// Which link of the document this run is the label of, so the pager can
+    /// mark the one the reader selected (`navigation::Link::key`).
+    pub key: Option<LinkKey>,
 }
 
 impl RenderedSpan {
@@ -85,7 +89,13 @@ impl RenderedSpan {
             text: crate::text::into_visible(text.into()),
             role,
             link: None,
+            key: None,
         }
+    }
+
+    pub fn with_key(mut self, key: LinkKey) -> Self {
+        self.key = Some(key);
+        self
     }
 
     pub fn with_link(mut self, link: impl Into<String>) -> Self {
