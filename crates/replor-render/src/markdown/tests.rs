@@ -76,6 +76,30 @@ fn tight_nested_lists_keep_their_structure() {
     assert_eq!(plain_of(&inner.items[1].blocks[0]), "c");
 }
 
+/// A tight item has no paragraph of its own, so an item that opens with a link
+/// or emphasis must still get one to hold it.
+#[test]
+fn a_tight_item_starting_with_a_link_or_emphasis_keeps_its_content() {
+    let d = doc("- [link](a.md) after\n- **strong**\n- *em*\n- ~~gone~~\n- ![alt](a.png)\n");
+    let Block::List(list) = &d.blocks[0] else {
+        panic!("expected list");
+    };
+    let texts: Vec<String> = list
+        .items
+        .iter()
+        .map(|item| match item.blocks.as_slice() {
+            [block] => plain_of(block),
+            other => panic!("expected one paragraph, got {other:?}"),
+        })
+        .collect();
+    assert_eq!(texts, ["link after", "strong", "em", "gone", "alt"]);
+    let Block::Paragraph(p) = &list.items[0].blocks[0] else {
+        panic!("expected a paragraph");
+    };
+    assert!(matches!(p.content.first(), Some(Inline::Link(l)) if l.dest == "a.md"));
+    assert_eq!((p.range.line_start, p.range.line_end), (1, 1));
+}
+
 #[test]
 fn ordered_lists_keep_their_start_value() {
     let d = doc("3. c\n4. d\n");

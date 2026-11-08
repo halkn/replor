@@ -167,6 +167,16 @@ impl<'a> Builder<'a> {
             Event::Start(tag) => {
                 if starts_block(&tag) {
                     self.close_implicit_paragraph();
+                } else if starts_inline_container(&tag) && self.needs_implicit_paragraph() {
+                    // A tight item opening with a link or emphasis has no
+                    // paragraph yet, and the container would close into
+                    // nothing that keeps inlines.
+                    self.stack.push(Frame::Paragraph {
+                        start,
+                        end,
+                        implicit: true,
+                        content: Vec::new(),
+                    });
                 }
                 self.open(tag, start, end);
             }
@@ -585,6 +595,13 @@ fn starts_block(tag: &Tag<'_>) -> bool {
             | Tag::Item
             | Tag::FootnoteDefinition(_)
             | Tag::Table(_)
+    )
+}
+
+fn starts_inline_container(tag: &Tag<'_>) -> bool {
+    matches!(
+        tag,
+        Tag::Emphasis | Tag::Strong | Tag::Strikethrough | Tag::Link { .. } | Tag::Image { .. }
     )
 }
 

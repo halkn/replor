@@ -1,0 +1,14 @@
+---
+source: crates/replor-render/tests/render.rs
+expression: "plain(\"tests/fixtures/gfm/tight-list-inline.md\", \"80\")"
+---
+# Tight list items
+────────────────────────────────────────────────────────────────────────────────
+
+Each item opens with an inline container rather than plain text.
+• Design (tests/fixtures/gfm/design/p1-core.md) for the crates
+• Bold first
+• Emphasis first
+• Struck first
+• code first
+• plain first
