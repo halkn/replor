@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod config;
+pub mod navigate;
 pub mod pager;
 pub mod preview;
 pub mod start;

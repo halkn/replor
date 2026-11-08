@@ -19,15 +19,19 @@ use replor_render::error::AppError;
 use replor_render::layout::theme::Theme;
 use replor_render::layout::{LayoutOptions, RenderedDocument, StyleRole, layout_document};
 use replor_render::markdown::model::{Document, headings};
+use replor_render::navigation::{Anchor, Link, Target, anchors, links};
 use replor_render::snapshot::{EntryKind, Snapshot, SnapshotPath};
 
+use crate::navigate::{self, Destination, History, Place};
 use crate::pager::TerminalGuard;
 use crate::pager::event::{Input, map};
 use crate::pager::help;
 use crate::pager::images::{self, ImageSession, Placed};
 use crate::pager::search::SearchIndex;
-use crate::pager::state::{Action, Mode, OutlineItem, PagerState, rendered_line_for_source};
-use crate::pager::view::{self, ViewContext, convert, elide_end, help_rows, widest_line};
+use crate::pager::state::{
+    Action, Mode, OutlineItem, PagerState, rendered_line_for_source, source_line_at,
+};
+use crate::pager::view::{self, LinkBar, ViewContext, convert, elide_end, help_rows, widest_line};
 use crate::preview::{self, Content, Options};
 use crate::tree::{Opened, Tree};
 
@@ -51,6 +55,11 @@ pub enum Command {
     TreeExpand,
     TreeCollapse,
     TreeOpen,
+    /// Selects the next (1) or previous (-1) link in the preview.
+    SelectLink(isize),
+    FollowLink,
+    Back,
+    Forward,
     Preview(Input),
     Ignored,
 }
@@ -73,6 +82,8 @@ pub fn route(focus: Focus, mode: Mode, key: KeyEvent) -> Command {
         KeyCode::Char('r') => return Command::Reload,
         KeyCode::Char('?') => return Command::Preview(Input::Navigate(Action::ToggleHelp)),
         KeyCode::Char('q') | KeyCode::Esc => return Command::Quit,
+        KeyCode::Char('[') => return Command::Back,
+        KeyCode::Char(']') => return Command::Forward,
         _ => {}
     }
     match focus {
@@ -84,11 +95,22 @@ pub fn route(focus: Focus, mode: Mode, key: KeyEvent) -> Command {
             KeyCode::Enter => Command::TreeOpen,
             _ => Command::Ignored,
         },
-        Focus::Preview => match map(key, mode) {
-            Input::Ignored => Command::Ignored,
-            input => Command::Preview(input),
+        Focus::Preview => match key.code {
+            KeyCode::Char('f') => Command::SelectLink(1),
+            KeyCode::Char('F') => Command::SelectLink(-1),
+            KeyCode::Enter => Command::FollowLink,
+            _ => match map(key, mode) {
+                Input::Ignored => Command::Ignored,
+                input => Command::Preview(input),
+            },
         },
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Direction {
+    Back,
+    Forward,
 }
 
 /// What a key changed, for the frame loop.
@@ -114,6 +136,12 @@ pub struct App {
     state: PagerState,
     tree_area: Rect,
     preview_area: Rect,
+    history: History,
+    /// The open document's links and headings, from its IR.
+    links: Vec<Link>,
+    anchors: Vec<Anchor>,
+    selected_link: Option<usize>,
+    link_bar: Option<LinkBar>,
 }
 
 impl App {
@@ -144,6 +172,11 @@ impl App {
             state: PagerState::new(0, 0, 1, 1),
             tree_area,
             preview_area,
+            history: History::default(),
+            links: Vec::new(),
+            anchors: Vec::new(),
+            selected_link: None,
+            link_bar: None,
         };
         app.lay_out_fresh();
         app
@@ -178,6 +211,21 @@ impl App {
         &self.rendered
     }
 
+    /// The file in the preview, if it shows one.
+    pub fn opened(&self) -> Option<&SnapshotPath> {
+        self.opened.as_ref()
+    }
+
+    /// The selected link's destination, or why a link was not followed.
+    pub fn link_bar(&self) -> Option<&LinkBar> {
+        self.link_bar.as_ref()
+    }
+
+    /// The source line at the top of the preview.
+    pub fn top_line(&self) -> Option<usize> {
+        source_line_at(&self.rendered.lines, self.state.viewport.top)
+    }
+
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
         match route(self.focus, self.state.mode(), key) {
             Command::Quit => return Outcome::Quit,
@@ -201,7 +249,16 @@ impl App {
                 let opened = self.tree.open();
                 return self.show(opened);
             }
+            Command::SelectLink(step) => self.select_link(step),
+            Command::FollowLink => return self.follow(),
+            Command::Back => return self.go(Direction::Back),
+            Command::Forward => return self.go(Direction::Forward),
             Command::Preview(input) => {
+                // Any other move leaves the link that was selected.
+                if matches!(input, Input::Navigate(_)) {
+                    self.selected_link = None;
+                    self.link_bar = None;
+                }
                 if !self.apply(input) {
                     return Outcome::Quit;
                 }
@@ -209,6 +266,189 @@ impl App {
             Command::Ignored => {}
         }
         Outcome::Continue
+    }
+
+    /// The rendered line a link is drawn on, found by the source range the
+    /// IR gave it rather than by searching the text. A TOC entry carries its
+    /// heading's range, so it is looked for after the TOC's first line.
+    fn link_line(&self, link: &Link) -> Option<usize> {
+        let lines = &self.rendered.lines;
+        let from = match link.toc {
+            Some(toc) => lines.iter().position(|l| l.source_range == Some(toc))? + 1,
+            None => 0,
+        };
+        (from..lines.len()).find(|&i| lines[i].source_range == Some(link.range))
+    }
+
+    fn select_link(&mut self, step: isize) {
+        if self.links.is_empty() {
+            self.refuse("no links in this file".to_string());
+            return;
+        }
+        let total = self.links.len();
+        let top = self.state.viewport.top;
+        // The link bar covers the last row while a link is selected.
+        let bottom = top + self.state.viewport.height.saturating_sub(1).max(1);
+        let next = match self.selected_link {
+            Some(index) => (index as isize + step).rem_euclid(total as isize) as usize,
+            // The first selection starts from what is on screen.
+            None => {
+                let lines: Vec<Option<usize>> =
+                    self.links.iter().map(|link| self.link_line(link)).collect();
+                match step > 0 {
+                    true => lines.iter().position(|l| l.is_some_and(|l| l >= top)),
+                    false => lines.iter().rposition(|l| l.is_some_and(|l| l < bottom)),
+                }
+                .unwrap_or(if step > 0 { 0 } else { total - 1 })
+            }
+        };
+        self.selected_link = Some(next);
+        if let Some(line) = self.link_line(&self.links[next])
+            && (line < top || line >= bottom)
+        {
+            self.state.viewport.top = line
+                .saturating_sub(self.state.viewport.height / 3)
+                .min(self.state.max_top());
+        }
+        let link = &self.links[next];
+        let text = match &link.target {
+            Target::Dest(dest) => dest.clone(),
+            Target::Heading(_) => format!("heading: {}", link.label),
+        };
+        self.link_bar = Some(LinkBar {
+            text: replor_render::text::into_visible(text),
+            position: format!("{}/{total}", next + 1),
+            refused: false,
+        });
+    }
+
+    fn follow(&mut self) -> Outcome {
+        let Some(link) = self.selected_link.map(|index| self.links[index].clone()) else {
+            return self.refuse("select a link with f first".to_string());
+        };
+        let dest = match link.target {
+            Target::Heading(range) => {
+                self.remember();
+                self.scroll_to_source(range.line_start);
+                self.leave_link();
+                return Outcome::Continue;
+            }
+            Target::Dest(dest) => dest,
+        };
+        let source = self.content.document.inline().source.clone();
+        let destination = match navigate::resolve(source.as_ref(), &dest) {
+            Ok(destination) => destination,
+            Err(reason) => return self.refuse(format!("cannot follow {dest}: {reason}")),
+        };
+        match destination {
+            Destination::External(url) => self.refuse(format!("not opened: {url}")),
+            Destination::Here(fragment) => match navigate::find_anchor(&self.anchors, &fragment) {
+                Some(anchor) => {
+                    let line = anchor.range.line_start;
+                    self.remember();
+                    self.scroll_to_source(line);
+                    self.leave_link();
+                    Outcome::Continue
+                }
+                None => self.refuse(format!("no heading #{fragment}")),
+            },
+            Destination::File { path, fragment } => {
+                let content = preview::open(&self.snapshot, &path, &self.options);
+                // The heading is looked for before anything moves, so a
+                // missing one leaves the reader where they are.
+                let line = match &fragment {
+                    Some(fragment) => {
+                        let found = anchors(content.document.document());
+                        match navigate::find_anchor(&found, fragment) {
+                            Some(anchor) => Some(anchor.range.line_start),
+                            None => {
+                                return self.refuse(format!("{path} has no heading #{fragment}"));
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                self.remember();
+                self.replace(path, content);
+                if let Some(line) = line {
+                    self.scroll_to_source(line);
+                }
+                Outcome::Replaced
+            }
+        }
+    }
+
+    /// Says in the link bar why nothing moved. The selection stays, so the
+    /// reader can pick another link from where they are.
+    fn refuse(&mut self, message: String) -> Outcome {
+        let position = match self.selected_link {
+            Some(index) => format!("{}/{}", index + 1, self.links.len()),
+            None => String::new(),
+        };
+        self.link_bar = Some(LinkBar {
+            text: replor_render::text::into_visible(message),
+            position,
+            refused: true,
+        });
+        Outcome::Continue
+    }
+
+    fn leave_link(&mut self) {
+        self.selected_link = None;
+        self.link_bar = None;
+    }
+
+    fn go(&mut self, direction: Direction) -> Outcome {
+        let place = self.current_place().and_then(|current| match direction {
+            Direction::Back => self.history.back(current),
+            Direction::Forward => self.history.forward(current),
+        });
+        let Some(place) = place else {
+            let message = match direction {
+                Direction::Back => "nothing to go back to",
+                Direction::Forward => "nothing to go forward to",
+            };
+            return self.refuse(message.to_string());
+        };
+        let replaced = self.opened.as_ref() != Some(&place.path);
+        if replaced {
+            let content = preview::open(&self.snapshot, &place.path, &self.options);
+            self.replace(place.path.clone(), content);
+        }
+        self.scroll_to_source(place.line);
+        self.leave_link();
+        match replaced {
+            true => Outcome::Replaced,
+            false => Outcome::Continue,
+        }
+    }
+
+    /// Where the reader is: the open file and the source line at the top.
+    fn current_place(&self) -> Option<Place> {
+        Some(Place {
+            path: self.opened.clone()?,
+            line: source_line_at(&self.rendered.lines, self.state.viewport.top).unwrap_or(1),
+        })
+    }
+
+    fn remember(&mut self) {
+        if let Some(place) = self.current_place() {
+            self.history.visit(place);
+        }
+    }
+
+    fn replace(&mut self, path: SnapshotPath, content: Content) {
+        self.tree.select(&path);
+        self.content = content;
+        self.opened = Some(path);
+        self.lay_out_fresh();
+    }
+
+    fn scroll_to_source(&mut self, line: usize) {
+        if let Some(index) = rendered_line_for_source(&self.rendered.lines, line) {
+            self.state.viewport.top = index.min(self.state.max_top());
+            self.state.initial_line = Some(index);
+        }
     }
 
     /// Puts a file the tree handed over into the preview.
@@ -238,6 +478,7 @@ impl App {
         self.tree.reload();
         if let Some(path) = self.opened.clone() {
             self.content = preview::open(&self.snapshot, &path, &self.options);
+            self.index();
             self.lay_out_again();
             self.state.status = Some("reloaded".to_string());
         }
@@ -273,8 +514,17 @@ impl App {
         )
     }
 
+    fn index(&mut self) {
+        let document = self.content.document.document();
+        self.links = links(document);
+        self.anchors = anchors(document);
+        self.selected_link = None;
+        self.link_bar = None;
+    }
+
     /// A new surface in the preview, read from the top.
     fn lay_out_fresh(&mut self) {
+        self.index();
         let (height, width) = self.body();
         self.rendered = layout_document(&self.content.document, LayoutOptions::new(width));
         self.texts = self.rendered.lines.iter().map(|l| l.text()).collect();
@@ -316,6 +566,8 @@ impl App {
             source_lines: self.content.document.document().source.line_count(),
             diagnostics: self.rendered.diagnostics.len(),
             theme: self.theme,
+            selected_link: self.selected_link.map(|index| self.links[index].key),
+            link_bar: self.link_bar.as_ref(),
         };
         view::draw(
             frame,

@@ -13,6 +13,7 @@ use crate::pager::state::{Mode, PagerState, source_line_at};
 use replor_render::layout::theme::{Color, Style, Theme};
 use replor_render::layout::wrap::display_width;
 use replor_render::layout::{RenderedLine, StyleRole};
+use replor_render::navigation::LinkKey;
 
 /// A search match on screen: the one being visited, or one of the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +40,18 @@ pub struct VisibleSpan {
     /// The destination is a real URL. Underlined, as in the stdout backend, so
     /// it stands out from a relative path or a `#123` styled the same way.
     pub linked: bool,
+    /// The link this run is the label of.
+    pub key: Option<LinkKey>,
+}
+
+/// The line above the status bar while a link is selected or refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkBar {
+    pub text: String,
+    /// Where the link stands among the document's links, such as `2/7`.
+    pub position: String,
+    /// The link was not followed, and `text` says why.
+    pub refused: bool,
 }
 
 pub struct ViewContext<'a> {
@@ -47,6 +60,9 @@ pub struct ViewContext<'a> {
     pub source_lines: usize,
     pub diagnostics: usize,
     pub theme: Theme,
+    /// Drawn reversed, so the reader sees which link `Enter` follows.
+    pub selected_link: Option<LinkKey>,
+    pub link_bar: Option<&'a LinkBar>,
 }
 
 pub fn draw(
@@ -97,7 +113,11 @@ pub fn draw(
                         if span.linked {
                             style.underline = true;
                         }
-                        RatSpan::styled(span.text, convert(style))
+                        let mut style = convert(style);
+                        if span.key.is_some() && span.key == ctx.selected_link {
+                            style = style.add_modifier(Modifier::REVERSED);
+                        }
+                        RatSpan::styled(span.text, style)
                     })
                     .collect::<Vec<_>>(),
             )
@@ -106,6 +126,17 @@ pub fn draw(
 
     let current = source_line_at(lines, state.viewport.top).unwrap_or(0);
     frame.render_widget(Paragraph::new(rows), body);
+    if let Some(bar) = ctx.link_bar
+        && body.height > 1
+    {
+        let area = Rect {
+            y: body.y + body.height - 1,
+            height: 1,
+            ..body
+        };
+        frame.render_widget(Clear, area);
+        frame.render_widget(link_bar(bar, ctx, area.width as usize), area);
+    }
     frame.render_widget(
         status_bar(state, ctx, current, status.width as usize),
         status,
@@ -276,7 +307,8 @@ pub fn visible(
                 Some(last)
                     if last.role == span.role
                         && last.highlighted == highlighted
-                        && last.linked == linked =>
+                        && last.linked == linked
+                        && last.key == span.key =>
                 {
                     last.text.push_str(grapheme);
                 }
@@ -285,11 +317,37 @@ pub fn visible(
                     role: span.role,
                     highlighted,
                     linked,
+                    key: span.key,
                 }),
             }
         }
     }
     out
+}
+
+/// The selected link's destination, or why it was not followed, with its
+/// place among the links on the right.
+fn link_bar<'a>(bar: &LinkBar, ctx: &ViewContext<'_>, width: usize) -> Paragraph<'a> {
+    let (marker, role) = match bar.refused {
+        true => ("! ", StyleRole::Warning),
+        false => ("→ ", StyleRole::LinkTarget),
+    };
+    let right = match bar.position.is_empty() {
+        true => String::new(),
+        false => format!("  [{}]", bar.position),
+    };
+    let budget = width.saturating_sub(display_width(marker) + display_width(&right));
+    let text = elide_end(&bar.text, budget);
+    let gap =
+        width.saturating_sub(display_width(marker) + display_width(&text) + display_width(&right));
+    let style = convert(ctx.theme.style(role));
+    let muted = convert(ctx.theme.style(StyleRole::Muted));
+    Paragraph::new(RatLine::from(vec![
+        RatSpan::styled(marker, style),
+        RatSpan::styled(text, style),
+        RatSpan::styled(" ".repeat(gap), muted),
+        RatSpan::styled(right, muted),
+    ]))
 }
 
 fn status_bar<'a>(
@@ -525,6 +583,8 @@ mod tests {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(30, 5)).unwrap();
         let ctx = ViewContext {
+            selected_link: None,
+            link_bar: None,
             title: "doc.md",
             flavor: "gfm",
             source_lines: 1,
@@ -617,6 +677,8 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(state.viewport.width as u16, 12);
         let mut terminal = ratatui::Terminal::new(backend).expect("test backend");
         let ctx = ViewContext {
+            selected_link: None,
+            link_bar: None,
             title: "doc.md",
             flavor: "gfm",
             source_lines: lines.len(),
@@ -685,6 +747,8 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(40, 3);
         let mut terminal = ratatui::Terminal::new(backend).expect("test backend");
         let ctx = ViewContext {
+            selected_link: None,
+            link_bar: None,
             title: "doc.md",
             flavor: "gfm",
             source_lines: 1,
@@ -811,6 +875,8 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(60, 31);
         let mut terminal = ratatui::Terminal::new(backend).expect("test backend");
         let ctx = ViewContext {
+            selected_link: None,
+            link_bar: None,
             title: "doc.md",
             flavor: "gfm",
             source_lines: taller.len(),
@@ -852,6 +918,8 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(40, 3);
         let mut terminal = ratatui::Terminal::new(backend).expect("test backend");
         let ctx = ViewContext {
+            selected_link: None,
+            link_bar: None,
             title: "doc.md",
             flavor: "gfm",
             source_lines: 1,
