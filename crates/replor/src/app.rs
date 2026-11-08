@@ -133,9 +133,11 @@ pub struct App {
     options: Options,
     theme: Theme,
     opened: Option<SnapshotPath>,
-    /// The open Markdown file is shown as its text. Opening any file, by any
-    /// means, goes back to the rendering, where its links can be followed.
-    source_view: bool,
+    /// The rendering of the open Markdown file while its source is shown,
+    /// kept so going back does not read the file and render its diagrams
+    /// again. Opening any file, by any means, goes back to the rendering,
+    /// where its links can be followed.
+    rendering: Option<Content>,
     content: Content,
     rendered: RenderedDocument,
     texts: SearchIndex,
@@ -172,7 +174,7 @@ impl App {
             options,
             theme,
             opened: None,
-            source_view: false,
+            rendering: None,
             content,
             rendered: RenderedDocument::default(),
             texts: SearchIndex::default(),
@@ -191,11 +193,8 @@ impl App {
 
     /// Opens `path` in the preview and selects it in the tree.
     pub fn open(&mut self, path: &SnapshotPath) {
-        self.tree.select(path);
-        self.content = preview::open(&self.snapshot, path, &self.options);
-        self.opened = Some(path.clone());
-        self.source_view = false;
-        self.lay_out_fresh();
+        let content = preview::open(&self.snapshot, path, &self.options);
+        self.replace(Some(path.clone()), content);
     }
 
     /// A message in the status bar, such as a warning about the configuration.
@@ -379,7 +378,7 @@ impl App {
                     None => None,
                 };
                 self.remember();
-                self.replace(path, content);
+                self.replace(Some(path), content);
                 if let Some(line) = line {
                     self.scroll_to_source(line);
                 }
@@ -423,7 +422,7 @@ impl App {
         let replaced = self.opened.as_ref() != Some(&place.path);
         if replaced {
             let content = preview::open(&self.snapshot, &place.path, &self.options);
-            self.replace(place.path.clone(), content);
+            self.replace(Some(place.path.clone()), content);
         }
         self.scroll_to_file_line(place.line);
         self.leave_link();
@@ -433,7 +432,7 @@ impl App {
         }
     }
 
-    /// Where the reader is: the open file and the source line at the top.
+    /// Where the reader is: the open file and its line at the top.
     fn current_place(&self) -> Option<Place> {
         Some(Place {
             path: self.opened.clone()?,
@@ -443,25 +442,22 @@ impl App {
 
     fn toggle_source(&mut self) -> Outcome {
         let Some(path) = self.opened.clone().filter(preview::is_markdown) else {
-            self.state.status = Some("only Markdown has a source view".to_string());
-            return Outcome::Continue;
+            return self.refuse("only Markdown has a source view".to_string());
         };
         // Rendered lines differ between the two, so the place is kept as a
         // line of the file.
         let line = self.top_line().unwrap_or(1);
-        self.source_view = !self.source_view;
-        self.content = self.load(&path);
+        match self.rendering.take() {
+            Some(rendering) => self.content = rendering,
+            None => match preview::source(&self.snapshot, &path, &self.options) {
+                Ok(source) => self.rendering = Some(std::mem::replace(&mut self.content, source)),
+                // The rendering stays, so the reader keeps their place.
+                Err(reason) => return self.refuse(format!("cannot show the source: {reason}")),
+            },
+        }
         self.lay_out_fresh();
         self.scroll_to_file_line(line);
         Outcome::Replaced
-    }
-
-    /// The open file in the view the reader chose.
-    fn load(&self, path: &SnapshotPath) -> Content {
-        match self.source_view {
-            true => preview::source(&self.snapshot, path, &self.options),
-            false => preview::open(&self.snapshot, path, &self.options),
-        }
     }
 
     fn remember(&mut self) {
@@ -470,11 +466,15 @@ impl App {
         }
     }
 
-    fn replace(&mut self, path: SnapshotPath, content: Content) {
-        self.tree.select(&path);
+    /// A new surface in the preview: a file, or a notice when `path` is
+    /// `None`. It always starts as the rendering.
+    fn replace(&mut self, path: Option<SnapshotPath>, content: Content) {
+        if let Some(path) = &path {
+            self.tree.select(path);
+        }
         self.content = content;
-        self.opened = Some(path);
-        self.source_view = false;
+        self.opened = path;
+        self.rendering = None;
         self.lay_out_fresh();
     }
 
@@ -495,10 +495,8 @@ impl App {
     fn show(&mut self, opened: Opened) -> Outcome {
         match opened {
             Opened::File(entry) if entry.kind == EntryKind::Submodule => {
-                self.content = preview::notice("A submodule is another repository.", &self.options);
-                self.opened = None;
-                self.source_view = false;
-                self.lay_out_fresh();
+                let notice = preview::notice("A submodule is another repository.", &self.options);
+                self.replace(None, notice);
                 Outcome::Replaced
             }
             Opened::File(entry) => {
@@ -518,10 +516,29 @@ impl App {
     fn reload(&mut self) {
         self.tree.reload();
         if let Some(path) = self.opened.clone() {
-            self.content = self.load(&path);
+            let rendering = preview::open(&self.snapshot, &path, &self.options);
+            let mut refused = None;
+            // The source stays shown, unless the file has grown past what it
+            // can show.
+            self.content = match self.rendering.take() {
+                None => rendering,
+                Some(_) => match preview::source(&self.snapshot, &path, &self.options) {
+                    Ok(source) => {
+                        self.rendering = Some(rendering);
+                        source
+                    }
+                    Err(reason) => {
+                        refused = Some(format!("cannot show the source: {reason}"));
+                        rendering
+                    }
+                },
+            };
             self.index();
             self.lay_out_again();
             self.state.status = Some("reloaded".to_string());
+            if let Some(message) = refused {
+                self.refuse(message);
+            }
         }
     }
 

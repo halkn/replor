@@ -47,26 +47,30 @@ pub struct Content {
     pub line_offset: usize,
 }
 
+/// The opening fence a file shown as code has above its first line.
+const FENCE_LINES: usize = 1;
+
 pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options) -> Content {
     let extension = extension(path);
-    let ((document, line_offset), kind) = if MARKDOWN.contains(&extension.as_str()) {
-        (
-            (markdown(snapshot, path, options), 0),
-            flavor_name(options.flavor),
-        )
-    } else if IMAGES.contains(&extension.as_str()) {
-        ((picture(snapshot, path, options), 0), "image".to_string())
-    } else {
-        (
-            text(snapshot, path, &extension, options),
-            "text".to_string(),
-        )
-    };
-    Content {
+    let content = |document, kind: &str, line_offset| Content {
         document,
         title: title(path),
-        kind,
+        kind: kind.to_string(),
         line_offset,
+    };
+    if is_markdown(path) {
+        content(
+            markdown(snapshot, path, options),
+            &flavor_name(options.flavor),
+            0,
+        )
+    } else if IMAGES.contains(&extension.as_str()) {
+        content(picture(snapshot, path, options), "image", 0)
+    } else {
+        match text(snapshot, path, &extension, options) {
+            Ok(document) => content(document, "text", FENCE_LINES),
+            Err(reason) => content(plain(&cannot_show(&reason), options), "text", 0),
+        }
     }
 }
 
@@ -78,15 +82,19 @@ pub fn is_markdown(path: &SnapshotPath) -> bool {
 
 /// A Markdown file as its text, through the same path and limits as any text
 /// file: the Markdown limit is far larger, and highlighting that much would
-/// freeze the UI.
-pub fn source(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options) -> Content {
-    let (document, line_offset) = text(snapshot, path, &extension(path), options);
-    Content {
+/// freeze the UI. Fails with the reason when it cannot be shown.
+pub fn source(
+    snapshot: &Arc<dyn Snapshot>,
+    path: &SnapshotPath,
+    options: &Options,
+) -> Result<Content, String> {
+    let document = text(snapshot, path, &extension(path), options)?;
+    Ok(Content {
         document,
         title: title(path),
         kind: "source".to_string(),
-        line_offset,
-    }
+        line_offset: FENCE_LINES,
+    })
 }
 
 /// The pane before any file is chosen, or with a message of its own.
@@ -160,31 +168,29 @@ fn picture(
     )
 }
 
-/// The file as a fenced code block, with the number of lines the fence puts
-/// above it; a notice in its place has none.
+/// The file as a fenced code block, or why it cannot be shown.
 fn text(
     snapshot: &Arc<dyn Snapshot>,
     path: &SnapshotPath,
     extension: &str,
     options: &Options,
-) -> (PreparedDocument, usize) {
-    let refuse = |reason: &str| (plain(&cannot_show(reason), options), 0);
+) -> Result<PreparedDocument, String> {
     let bytes = match snapshot.read(path, MAX_TEXT_BYTES) {
         Ok(bytes) => bytes,
         Err(SnapshotError::TooLarge { limit }) => {
-            return refuse(&format!("larger than {limit} bytes"));
+            return Err(format!("larger than {limit} bytes"));
         }
-        Err(err) => return refuse(&err.to_string()),
+        Err(err) => return Err(err.to_string()),
     };
     // Git's test for a binary file: a NUL in the first 8000 bytes.
     if bytes.iter().take(8000).any(|&b| b == 0) {
-        return refuse("binary file");
+        return Err("binary file".to_string());
     }
     let Ok(body) = document::decode(bytes, path.as_str()) else {
-        return refuse("not UTF-8 text");
+        return Err("not UTF-8 text".to_string());
     };
     if body.lines().count() > MAX_TEXT_LINES {
-        return refuse(&format!("more than {MAX_TEXT_LINES} lines"));
+        return Err(format!("more than {MAX_TEXT_LINES} lines"));
     }
     let longest = longest_run(&body, '`');
     let fence = "`".repeat(longest.max(2) + 1);
@@ -197,7 +203,7 @@ fn text(
     // looks up a syntax.
     let text = format!("{fence}{extension}\n{body}{newline}{fence}\n");
     let built = document::build(text, Flavor::Gfm, MermaidMode::Off, options.mermaid_width);
-    (PreparedDocument::new(built, inline(options)), 1)
+    Ok(PreparedDocument::new(built, inline(options)))
 }
 
 fn plain(text: &str, options: &Options) -> PreparedDocument {

@@ -123,6 +123,9 @@ fn s_shows_the_source_and_back_at_the_same_line() {
     }
     let moved = app.top_line().expect("a source line at the top");
     assert!(moved > line, "{moved}");
+    // A paragraph's line, which the preview starts a block on. From a blank
+    // line between paragraphs the preview goes to the next one instead.
+    assert_eq!(moved % 2, 1, "{moved}");
     let moved_text = top_text(&app);
 
     assert_eq!(app.key(ch('s')), Outcome::Replaced);
@@ -139,8 +142,36 @@ fn s_is_refused_for_a_file_that_is_not_markdown() {
     let before = all_text(&app);
     assert_eq!(app.key(ch('s')), Outcome::Continue);
     assert_eq!(all_text(&app), before);
-    let status = app.state().status.clone().unwrap_or_default();
-    assert!(status.contains("Markdown"), "{status}");
+    assert!(refusal(&app).contains("Markdown"), "{}", refusal(&app));
+
+    // The reason belongs to that file, and goes when another opens.
+    app.open(&path("a.md"));
+    assert_eq!(refusal(&app), "");
+    assert_eq!(app.state().status, None);
+}
+
+/// The returning rendering is the one kept from before: only `r` reads the
+/// file again.
+#[test]
+fn back_from_the_source_is_the_rendering_kept_from_before() {
+    let dir = fixture();
+    let mut app = app(dir.path());
+    app.open(&path("b.md"));
+    app.key(ch('s'));
+    write(&dir.path().join("b.md"), "# B\n\nNow **bolder** text.\n");
+    assert_eq!(app.key(ch('s')), Outcome::Replaced);
+    let text = all_text(&app);
+    assert!(
+        text.contains("bold text") && !text.contains("bolder"),
+        "{text}"
+    );
+}
+
+fn refusal(app: &App) -> String {
+    app.link_bar()
+        .filter(|bar| bar.refused)
+        .map(|bar| bar.text.clone())
+        .unwrap_or_default()
 }
 
 #[test]
@@ -176,18 +207,28 @@ fn reload_keeps_the_source() {
     write(&dir.path().join("b.md"), "# B\n\nNow **bolder** text.\n");
     assert_eq!(app.key(ch('r')), Outcome::Replaced);
     assert!(all_text(&app).contains("**bolder**"), "{}", all_text(&app));
+    // The rendering kept aside was read again too.
+    app.key(ch('s'));
+    assert!(all_text(&app).contains("bolder"), "{}", all_text(&app));
 }
 
+/// The rendering stays, at the same place, with the reason in the link bar.
 #[test]
 fn the_source_of_a_long_markdown_file_is_not_shown() {
     let dir = fixture();
-    write(
-        &dir.path().join("long.md"),
-        &"x\n".repeat(MAX_TEXT_LINES + 1),
-    );
+    let body: String = (1..=MAX_TEXT_LINES / 2 + 1)
+        .map(|i| format!("Line {i}.\n\n"))
+        .collect();
+    write(&dir.path().join("long.md"), &body);
     let mut app = app(dir.path());
     app.open(&path("long.md"));
-    assert!(all_text(&app).contains('x'));
-    app.key(ch('s'));
-    assert!(all_text(&app).contains("more than"), "{}", all_text(&app));
+    for _ in 0..15 {
+        app.key(ch('j'));
+    }
+    let line = app.top_line();
+    let before = all_text(&app);
+    assert_eq!(app.key(ch('s')), Outcome::Continue);
+    assert_eq!(all_text(&app), before);
+    assert_eq!(app.top_line(), line);
+    assert!(refusal(&app).contains("more than"), "{}", refusal(&app));
 }

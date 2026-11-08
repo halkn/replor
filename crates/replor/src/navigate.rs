@@ -100,7 +100,8 @@ fn percent_decoded(text: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| text.to_string())
 }
 
-/// A file and a source line in it, which a re-layout cannot move.
+/// A file and a line of the file, which a re-layout cannot move. It is the
+/// file's line, not the document's, so it holds across Preview and Source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Place {
     pub path: SnapshotPath,
