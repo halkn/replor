@@ -5,6 +5,7 @@
 //! protocol; SVG never leaves this module.
 
 use std::any::Any;
+use std::cell::Cell;
 use std::panic::{self, AssertUnwindSafe};
 
 use merman::ascii::{
@@ -161,10 +162,25 @@ fn merman_svg(source: &str) -> Result<Option<String>, RenderError> {
 /// `AssertUnwindSafe` holds because every call builds its own `Renderer` and
 /// nothing it touched outlives the call.
 fn guarded<T>(call: impl FnOnce() -> T) -> Result<T, DiagramError> {
-    panic::catch_unwind(AssertUnwindSafe(call)).map_err(|payload| DiagramError {
+    let outer = GUARDED.replace(true);
+    let result = panic::catch_unwind(AssertUnwindSafe(call));
+    GUARDED.set(outer);
+    result.map_err(|payload| DiagramError {
         message: normalize(&format!("renderer panicked: {}", panic_message(&*payload))),
         unsupported: false,
     })
+}
+
+thread_local! {
+    static GUARDED: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether a panic on this thread now would be caught by `guarded`. A panic
+/// hook runs before the unwind reaches `catch_unwind`, so a hook that restores
+/// the terminal or prints must ask first, or a diagram that failed would
+/// tear down a TUI that goes on running.
+pub fn panic_is_caught() -> bool {
+    GUARDED.get()
 }
 
 fn panic_message(payload: &(dyn Any + Send)) -> &str {
@@ -403,6 +419,16 @@ mod tests {
             .render_png("graph LR\n  A --> B\n")
             .expect_err("a panic should be an error");
         assert_eq!(err.message, "renderer panicked: boom");
+    }
+
+    #[test]
+    fn a_hook_can_tell_the_panic_will_be_caught() {
+        assert!(!panic_is_caught());
+        let seen = guarded(panic_is_caught).expect("no panic");
+        assert!(seen);
+        assert!(!panic_is_caught());
+        let _ = guarded(|| panic!("boom"));
+        assert!(!panic_is_caught());
     }
 
     #[test]

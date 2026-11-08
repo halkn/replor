@@ -6,7 +6,24 @@ mdvu の pager（`replor` crate に置く。`docs/design/p1-core.md` の「mdvu 
 
 `TerminalGuard` が raw mode / alternate screen / カーソル表示のすべての変更を所有し、`Drop` で戻す。正常終了・エラー・panic のいずれでも端末が使える状態で終わること。端末モードを他の場所で直接変更しない。マウスキャプチャは有効にしない。
 
-描画コアは `merman` の panic を `catch_unwind` で捕まえて描画を続ける（`docs/render/rendering.md` の「Diagram」）。panic hook は捕まえる前に走る。既定の hook も stderr にメッセージを書くので、そのままでは捕まえた panic でも TUI の画面が崩れ、hook で端末を戻せば TUI が続けられなくなる。pager の panic hook は、この panic でも TUI が続くように書く。stdout の経路でも、既定の hook は文書の出力とは別に stderr へ panic のメッセージを書く。このメッセージは `RenderedSpan` の sanitize を通らない。
+描画コアは `merman` の panic を `catch_unwind` で捕まえて描画を続ける（`docs/render/rendering.md` の「Diagram」）。panic hook は捕まえる前に走る。既定の hook も stderr にメッセージを書くので、そのままでは捕まえた panic でも TUI の画面が崩れ、hook で端末を戻せば TUI が続けられなくなる。そのため pager の panic hook（`pager/mod.rs`）は、`diagram::mermaid::panic_is_caught()` が真なら何もしない。端末を戻さず、メッセージも書かない。stdout の経路でも、既定の hook は文書の出力とは別に stderr へ panic のメッセージを書く。このメッセージは `RenderedSpan` の sanitize を通らない。
+
+## Files lens
+
+replor では、mdvu の `pager/app.rs` の代わりに `crates/replor/src/app.rs` がイベントループを持ち、左にツリー、右に pager を置く。`pager/watch.rs` は `--watch`（P5）まで取り込まない。
+
+- **幅の配分は固定にする。** ツリーは画面幅の 3 割で、20〜40 桁かつ半分以下にする。変える操作は持たない。
+- **キーの振り分けは `app::route` が決める。**
+  - 検索の入力・見出しの一覧・ヘルプが開いている間は、フォーカスに関わらず pager がキーを受ける。
+  - それ以外では、`Tab`・`r`・`?`・`q`/`Esc`・`Ctrl-c` を app が受け、残りをフォーカスのあるペインに渡す。ツリーのキーは docsail、プレビューのキーは mdvu に揃える。ツリーには docsail に無い `h`（ディレクトリを閉じる。閉じたディレクトリやファイルでは 1 つ上へ移る）と `l`（ディレクトリを開く。ファイルでは `Enter` と同じく開く）を足した。
+  - キーの正は `pager/help.rs` の `ENTRIES` で、各キーが載せたペインで割り当て済みであることをテスト（`every_advertised_key_is_bound`）で確かめる。
+- **どのファイルも、描画コアの文書にしてプレビューに出す（`preview.rs`）。** 検索と見出しの一覧が、どのファイルでも同じ面で使える。
+  - Markdown は `document::load` で読む。
+  - 画像は 1 枚だけの文書にし、文書が指す画像と同じ検査を通す。
+  - テキストは、拡張子を言語にした fenced code block にする。
+  - 読めないものは、理由を一文で示す。
+- **テキストは 1 MiB・5,000 行まで出す。** 開いたときに同期でハイライトをかけ、syntect は約 0.1 ms／行かかる（ADR-0001 S3）。超えたものと、先頭 8000 バイトに NUL があるもの・UTF-8 でないものは、内容を出さずに理由を出す。
+- ファイル名は `text::visible` で制御文字を無害化してから描く。ファイル名から作る Markdown は、記号をすべてエスケープしてリンクや画像にならないようにする。
 
 ## レイアウトの再実行
 
