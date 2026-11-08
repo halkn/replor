@@ -86,6 +86,11 @@ golden!(gfm_alerts_80, "tests/fixtures/gfm/alerts.md", "80");
 golden!(gfm_alerts_120, "tests/fixtures/gfm/alerts.md", "120");
 golden!(gfm_wide_table_40, "tests/fixtures/gfm/wide-table.md", "40");
 golden!(
+    gfm_tight_list_inline_80,
+    "tests/fixtures/gfm/tight-list-inline.md",
+    "80"
+);
+golden!(
     gfm_wide_table_120,
     "tests/fixtures/gfm/wide-table.md",
     "120"
