@@ -15,6 +15,14 @@
 - `resvg` の `raster-images` を入れていないので、PNG を指されても描けず、読まれたかどうかが画素に現れない。この境界のテストが SVG ファイルを使うのはそのため。
 - system font の走査は 1 図あたりの費用の大半なので、`fontdb` は `OnceLock` で 1 プロセス 1 回だけ読む。
 
+## フォントの選び方
+
+- フォントは system fonts だけを使い、crate に同梱しない。generic の `sans-serif` は `SANS_SERIF` のうち最初に見つかった family に写す。`fontdb` の既定は Arial だけで、多くの Linux には無い。
+- **PostScript 名が `LastResort` の face を `fontdb` から外す。** macOS の Last Resort font は、どの文字にも代替の箱の glyph を持つ。`usvg` 0.46 の fallback（`text::layout::shape_text`）は、足りない文字ごとに face を探し、見つけた face で run 全体を shape し直し、全文字に glyph があれば run 全体をその face に置き換える。このため「承認 ✅」では、✅ を持つ face を探す途中で Last Resort が選ばれ、日本語を含むラベル全体が箱になった（macOS 27.0.1 で確認）。外すと、日本語は CJK を持つ face に、✅ は Apple Color Emoji に当たる。
+- 絵文字はカラーで描かない。Apple Color Emoji は sbix（ビットマップ）で、`raster-images` を入れていない `resvg` では描かれず、空白になる。目的は日本語のラベルが読めることで、絵文字の見た目ではない。
+- 直し方は face を外すことに留め、`usvg::Options` の font resolver は差し替えない。差し替えると、fallback の挙動を `resvg` の版ごとに追うことになる。
+- 自動テストは、絵文字を足しても他の文字の face が変わらないことを確かめる。どの face があるかは環境で違うので、face の名前は確かめない。Last Resort の無い環境（CI の Linux など）では、修正の前でも通る。
+
 ## 大きさと解像度
 
 - 図の表示サイズは、端末のセル画素数でも PNG の画素数でもなく **CSS 幅（1 列 = 8 px）** で決める（`DiagramPng::css_width` → `image::from_png`）。高密度ディスプレイの端末は物理ピクセルでセル寸法を返すため、画像ファイルと同じ `fit` にかけると図がブラウザの半分の大きさになる。行数上限（`MAX_ROWS`）は画像ファイルと共通。
