@@ -78,6 +78,18 @@ fn fonts() -> &'static Arc<fontdb::Database> {
     FONTS.get_or_init(|| {
         let mut db = fontdb::Database::new();
         db.load_system_fonts();
+        // macOS's Last Resort font maps every character to a placeholder box.
+        // `usvg` keeps a fallback face for a whole run once it has a glyph for
+        // every character, so one emoji with no other face would turn a whole
+        // label into boxes.
+        let last_resort: Vec<_> = db
+            .faces()
+            .filter(|face| face.post_script_name == "LastResort")
+            .map(|face| face.id)
+            .collect();
+        for id in last_resort {
+            db.remove_face(id);
+        }
         let installed = |name: &str| {
             db.faces()
                 .any(|face| face.families.iter().any(|(family, _)| family == name))
@@ -174,5 +186,46 @@ mod tests {
         let pixmap = Pixmap::decode_png(&raster.png).unwrap();
         assert!(pixmap.width() <= MAX_SIDE, "{}", pixmap.width());
         assert_eq!(raster.css_width, 9000);
+    }
+
+    /// The face each character of a label is drawn with, under the font list
+    /// Mermaid's CSS gives.
+    fn faces_of(label: &str) -> Vec<(String, fontdb::ID)> {
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="40"><text x="0" y="20" style="font-family:&quot;Recursive Variable&quot;,arial,sans-serif;font-size:16px">{label}</text></svg>"#
+        );
+        let options = usvg::Options {
+            fontdb: Arc::clone(fonts()),
+            ..usvg::Options::default()
+        };
+        let tree = usvg::Tree::from_str(&svg, &options).expect("valid svg");
+        let mut faces = Vec::new();
+        collect_faces(tree.root(), &mut faces);
+        faces
+    }
+
+    fn collect_faces(group: &usvg::Group, faces: &mut Vec<(String, fontdb::ID)>) {
+        for node in group.children() {
+            match node {
+                usvg::Node::Group(group) => collect_faces(group, faces),
+                usvg::Node::Text(text) => faces.extend(text.layouted().iter().flat_map(|span| {
+                    span.positioned_glyphs
+                        .iter()
+                        .map(|glyph| (glyph.text.clone(), glyph.font))
+                })),
+                _ => {}
+            }
+        }
+    }
+
+    /// An emoji must not change the face of the rest of the label. Which
+    /// faces exist is up to the system, so this compares against the same
+    /// label without the emoji rather than naming a face.
+    #[test]
+    fn an_emoji_leaves_the_faces_of_the_other_characters_alone() {
+        let plain = faces_of("承認");
+        let with_emoji = faces_of("承認 ✅");
+        assert_eq!(plain.len(), 2, "{plain:?}");
+        assert_eq!(with_emoji[..2], plain[..], "{with_emoji:?}");
     }
 }
