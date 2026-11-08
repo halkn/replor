@@ -265,6 +265,9 @@ pub enum Inline {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkInline {
+    /// Source byte offset of the link, which tells two links with the same
+    /// destination in one block apart.
+    pub offset: usize,
     pub dest: String,
     pub title: Option<String>,
     pub content: Vec<Inline>,

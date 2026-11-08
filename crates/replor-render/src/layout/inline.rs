@@ -3,6 +3,7 @@
 //! Hard breaks split the result into segments; the caller wraps each segment
 //! independently so an explicit break is never merged away.
 
+use crate::navigation::LinkKey;
 use std::path::{Path, PathBuf};
 
 use crate::image::has_scheme;
@@ -93,6 +94,7 @@ fn push_inline(
             if let Some(url) = hyperlink(&link.dest) {
                 attach_link(out, start, &url);
             }
+            attach_key(out, start, LinkKey::Inline(link.offset));
             if let Some(target) = link_target(&link.dest, &label, ctx) {
                 push(out, " (", StyleRole::LinkTarget);
                 push(out, &target, StyleRole::LinkTarget);
@@ -150,6 +152,21 @@ fn mark(out: &[Vec<RenderedSpan>]) -> Mark {
     (segment, out.get(segment).map_or(0, Vec::len))
 }
 
+/// Mark every span produced since `start` as the label of the link `key`.
+fn attach_key(out: &mut [Vec<RenderedSpan>], start: Mark, key: LinkKey) {
+    let (first_segment, first_span) = start;
+    for (index, segment) in out.iter_mut().enumerate().skip(first_segment) {
+        let from = if index == first_segment {
+            first_span
+        } else {
+            0
+        };
+        for span in segment.iter_mut().skip(from) {
+            span.key = Some(key);
+        }
+    }
+}
+
 /// Point every span produced since `start` at `url`.
 fn attach_link(out: &mut [Vec<RenderedSpan>], start: Mark, url: &str) {
     let (first_segment, first_span) = start;
@@ -193,7 +210,9 @@ fn coalesce(spans: Vec<RenderedSpan>) -> Vec<RenderedSpan> {
     let mut merged: Vec<RenderedSpan> = Vec::with_capacity(spans.len());
     for span in spans {
         match merged.last_mut() {
-            Some(last) if last.role == span.role && last.link == span.link => {
+            Some(last)
+                if last.role == span.role && last.link == span.link && last.key == span.key =>
+            {
                 last.text.push_str(&span.text)
             }
             _ => merged.push(span),
@@ -320,6 +339,7 @@ mod tests {
     #[test]
     fn links_show_an_informative_destination() {
         let inlines = vec![Inline::Link(LinkInline {
+            offset: 0,
             dest: "https://example.com/x".into(),
             title: None,
             content: vec![Inline::Text("docs".into())],
@@ -341,6 +361,7 @@ mod tests {
 
     fn linked(dest: &str, label: &str) -> Vec<RenderedSpan> {
         let inlines = vec![Inline::Link(LinkInline {
+            offset: 0,
             dest: dest.into(),
             title: None,
             content: vec![Inline::Text(label.into())],
@@ -389,6 +410,7 @@ mod tests {
     #[test]
     fn a_link_label_split_by_a_hard_break_keeps_the_destination() {
         let inlines = vec![Inline::Link(LinkInline {
+            offset: 0,
             dest: "https://example.com".into(),
             title: None,
             content: vec![
@@ -411,6 +433,7 @@ mod tests {
     #[test]
     fn an_empty_label_shows_the_destination_once() {
         let inlines = vec![Inline::Link(LinkInline {
+            offset: 0,
             dest: "https://example.com/x".into(),
             title: None,
             content: Vec::new(),
@@ -422,6 +445,7 @@ mod tests {
     fn autolinks_do_not_repeat_the_destination() {
         let url = "https://example.com";
         let inlines = vec![Inline::Link(LinkInline {
+            offset: 0,
             dest: url.into(),
             title: None,
             content: vec![Inline::Text(url.into())],
@@ -456,6 +480,7 @@ mod tests {
             ..Default::default()
         };
         let inlines = vec![Inline::Link(LinkInline {
+            offset: 0,
             dest: "design.md".into(),
             title: None,
             content: vec![Inline::Text("design".into())],
@@ -483,6 +508,7 @@ mod tests {
     #[test]
     fn stdin_leaves_relative_targets_unresolved() {
         let inlines = vec![Inline::Link(LinkInline {
+            offset: 0,
             dest: "design.md".into(),
             title: None,
             content: vec![Inline::Text("design".into())],
@@ -498,6 +524,7 @@ mod tests {
         };
         for dest in ["#section", "https://example.com/a", "/abs/x.md"] {
             let inlines = vec![Inline::Link(LinkInline {
+                offset: 0,
                 dest: dest.into(),
                 title: None,
                 content: vec![Inline::Text("l".into())],

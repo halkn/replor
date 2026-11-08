@@ -129,6 +129,7 @@ enum Frame {
         content: Vec<Inline>,
     },
     Link {
+        start: usize,
         dest: String,
         title: Option<String>,
         content: Vec<Inline>,
@@ -306,6 +307,7 @@ impl<'a> Builder<'a> {
             Tag::Link {
                 dest_url, title, ..
             } => Frame::Link {
+                start,
                 dest: dest_url.into_string(),
                 title: Some(title.into_string()).filter(|t| !t.is_empty()),
                 content: Vec::new(),
@@ -477,10 +479,12 @@ impl<'a> Builder<'a> {
             Frame::Strong { content } => self.inline_now(Inline::Strong(content)),
             Frame::Strikethrough { content } => self.inline_now(Inline::Strikethrough(content)),
             Frame::Link {
+                start,
                 dest,
                 title,
                 content,
             } => self.inline_now(Inline::Link(LinkInline {
+                offset: start,
                 dest,
                 title,
                 content,
