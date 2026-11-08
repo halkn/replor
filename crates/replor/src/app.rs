@@ -60,6 +60,8 @@ pub enum Command {
     FollowLink,
     Back,
     Forward,
+    /// Shows a Markdown file as its text, or its text as Markdown again.
+    ToggleSource,
     Preview(Input),
     Ignored,
 }
@@ -99,6 +101,7 @@ pub fn route(focus: Focus, mode: Mode, key: KeyEvent) -> Command {
             KeyCode::Char('f') => Command::SelectLink(1),
             KeyCode::Char('F') => Command::SelectLink(-1),
             KeyCode::Enter => Command::FollowLink,
+            KeyCode::Char('s') => Command::ToggleSource,
             _ => match map(key, mode) {
                 Input::Ignored => Command::Ignored,
                 input => Command::Preview(input),
@@ -130,6 +133,9 @@ pub struct App {
     options: Options,
     theme: Theme,
     opened: Option<SnapshotPath>,
+    /// The open Markdown file is shown as its text. Opening any file, by any
+    /// means, goes back to the rendering, where its links can be followed.
+    source_view: bool,
     content: Content,
     rendered: RenderedDocument,
     texts: SearchIndex,
@@ -166,6 +172,7 @@ impl App {
             options,
             theme,
             opened: None,
+            source_view: false,
             content,
             rendered: RenderedDocument::default(),
             texts: SearchIndex::default(),
@@ -187,6 +194,7 @@ impl App {
         self.tree.select(path);
         self.content = preview::open(&self.snapshot, path, &self.options);
         self.opened = Some(path.clone());
+        self.source_view = false;
         self.lay_out_fresh();
     }
 
@@ -221,9 +229,10 @@ impl App {
         self.link_bar.as_ref()
     }
 
-    /// The source line at the top of the preview.
+    /// The line of the open file at the top of the preview.
     pub fn top_line(&self) -> Option<usize> {
         source_line_at(&self.rendered.lines, self.state.viewport.top)
+            .map(|line| line.saturating_sub(self.content.line_offset).max(1))
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
@@ -253,6 +262,7 @@ impl App {
             Command::FollowLink => return self.follow(),
             Command::Back => return self.go(Direction::Back),
             Command::Forward => return self.go(Direction::Forward),
+            Command::ToggleSource => return self.toggle_source(),
             Command::Preview(input) => {
                 // Any other move leaves the link that was selected.
                 if matches!(input, Input::Navigate(_)) {
@@ -415,7 +425,7 @@ impl App {
             let content = preview::open(&self.snapshot, &place.path, &self.options);
             self.replace(place.path.clone(), content);
         }
-        self.scroll_to_source(place.line);
+        self.scroll_to_file_line(place.line);
         self.leave_link();
         match replaced {
             true => Outcome::Replaced,
@@ -427,8 +437,31 @@ impl App {
     fn current_place(&self) -> Option<Place> {
         Some(Place {
             path: self.opened.clone()?,
-            line: source_line_at(&self.rendered.lines, self.state.viewport.top).unwrap_or(1),
+            line: self.top_line().unwrap_or(1),
         })
+    }
+
+    fn toggle_source(&mut self) -> Outcome {
+        let Some(path) = self.opened.clone().filter(preview::is_markdown) else {
+            self.state.status = Some("only Markdown has a source view".to_string());
+            return Outcome::Continue;
+        };
+        // Rendered lines differ between the two, so the place is kept as a
+        // line of the file.
+        let line = self.top_line().unwrap_or(1);
+        self.source_view = !self.source_view;
+        self.content = self.load(&path);
+        self.lay_out_fresh();
+        self.scroll_to_file_line(line);
+        Outcome::Replaced
+    }
+
+    /// The open file in the view the reader chose.
+    fn load(&self, path: &SnapshotPath) -> Content {
+        match self.source_view {
+            true => preview::source(&self.snapshot, path, &self.options),
+            false => preview::open(&self.snapshot, path, &self.options),
+        }
     }
 
     fn remember(&mut self) {
@@ -441,14 +474,21 @@ impl App {
         self.tree.select(&path);
         self.content = content;
         self.opened = Some(path);
+        self.source_view = false;
         self.lay_out_fresh();
     }
 
+    /// Scrolls to a line of the document, as its IR numbers them.
     fn scroll_to_source(&mut self, line: usize) {
         if let Some(index) = rendered_line_for_source(&self.rendered.lines, line) {
             self.state.viewport.top = index.min(self.state.max_top());
             self.state.initial_line = Some(index);
         }
+    }
+
+    /// Scrolls to a line of the open file.
+    fn scroll_to_file_line(&mut self, line: usize) {
+        self.scroll_to_source(line + self.content.line_offset);
     }
 
     /// Puts a file the tree handed over into the preview.
@@ -457,6 +497,7 @@ impl App {
             Opened::File(entry) if entry.kind == EntryKind::Submodule => {
                 self.content = preview::notice("A submodule is another repository.", &self.options);
                 self.opened = None;
+                self.source_view = false;
                 self.lay_out_fresh();
                 Outcome::Replaced
             }
@@ -477,7 +518,7 @@ impl App {
     fn reload(&mut self) {
         self.tree.reload();
         if let Some(path) = self.opened.clone() {
-            self.content = preview::open(&self.snapshot, &path, &self.options);
+            self.content = self.load(&path);
             self.index();
             self.lay_out_again();
             self.state.status = Some("reloaded".to_string());

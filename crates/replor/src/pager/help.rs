@@ -134,6 +134,11 @@ pub const ENTRIES: &[Entry] = &[
         pane: Pane::Both,
     },
     Entry {
+        keys: &["s"],
+        action: "Markdown: switch between preview and source",
+        pane: Pane::Preview,
+    },
+    Entry {
         keys: &["r"],
         action: "Reload the tree and the open file",
         pane: Pane::Both,

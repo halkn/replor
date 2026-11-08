@@ -39,24 +39,23 @@ pub struct Content {
     pub document: PreparedDocument,
     /// The path shown in the status bar, already free of terminal controls.
     pub title: String,
-    /// What the status bar says the file is: a flavor, `text` or `image`.
+    /// What the status bar says the file is: a flavor, `text`, `source` or
+    /// `image`.
     pub kind: String,
+    /// Lines the document has above the file's first line: the opening fence
+    /// of a file shown as code.
+    pub line_offset: usize,
 }
 
 pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options) -> Content {
-    let title = replor_render::text::visible(path.as_str()).into_owned();
-    let extension = path
-        .name()
-        .and_then(|name| name.rsplit_once('.'))
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-        .unwrap_or_default();
-    let (document, kind) = if MARKDOWN.contains(&extension.as_str()) {
+    let extension = extension(path);
+    let ((document, line_offset), kind) = if MARKDOWN.contains(&extension.as_str()) {
         (
-            markdown(snapshot, path, options),
+            (markdown(snapshot, path, options), 0),
             flavor_name(options.flavor),
         )
     } else if IMAGES.contains(&extension.as_str()) {
-        (picture(snapshot, path, options), "image".to_string())
+        ((picture(snapshot, path, options), 0), "image".to_string())
     } else {
         (
             text(snapshot, path, &extension, options),
@@ -65,8 +64,28 @@ pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options
     };
     Content {
         document,
-        title,
+        title: title(path),
         kind,
+        line_offset,
+    }
+}
+
+/// Whether `path` has a Source view besides its Preview. Text is already
+/// shown as source, and a picture has none.
+pub fn is_markdown(path: &SnapshotPath) -> bool {
+    MARKDOWN.contains(&extension(path).as_str())
+}
+
+/// A Markdown file as its text, through the same path and limits as any text
+/// file: the Markdown limit is far larger, and highlighting that much would
+/// freeze the UI.
+pub fn source(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options) -> Content {
+    let (document, line_offset) = text(snapshot, path, &extension(path), options);
+    Content {
+        document,
+        title: title(path),
+        kind: "source".to_string(),
+        line_offset,
     }
 }
 
@@ -76,7 +95,19 @@ pub fn notice(message: &str, options: &Options) -> Content {
         document: plain(&format!("{}\n", escape(message)), options),
         title: String::new(),
         kind: String::new(),
+        line_offset: 0,
     }
+}
+
+fn title(path: &SnapshotPath) -> String {
+    replor_render::text::visible(path.as_str()).into_owned()
+}
+
+fn extension(path: &SnapshotPath) -> String {
+    path.name()
+        .and_then(|name| name.rsplit_once('.'))
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default()
 }
 
 fn markdown(
@@ -129,31 +160,31 @@ fn picture(
     )
 }
 
+/// The file as a fenced code block, with the number of lines the fence puts
+/// above it; a notice in its place has none.
 fn text(
     snapshot: &Arc<dyn Snapshot>,
     path: &SnapshotPath,
     extension: &str,
     options: &Options,
-) -> PreparedDocument {
+) -> (PreparedDocument, usize) {
+    let refuse = |reason: &str| (plain(&cannot_show(reason), options), 0);
     let bytes = match snapshot.read(path, MAX_TEXT_BYTES) {
         Ok(bytes) => bytes,
         Err(SnapshotError::TooLarge { limit }) => {
-            return plain(&cannot_show(&format!("larger than {limit} bytes")), options);
+            return refuse(&format!("larger than {limit} bytes"));
         }
-        Err(err) => return plain(&cannot_show(&err.to_string()), options),
+        Err(err) => return refuse(&err.to_string()),
     };
     // Git's test for a binary file: a NUL in the first 8000 bytes.
     if bytes.iter().take(8000).any(|&b| b == 0) {
-        return plain(&cannot_show("binary file"), options);
+        return refuse("binary file");
     }
     let Ok(body) = document::decode(bytes, path.as_str()) else {
-        return plain(&cannot_show("not UTF-8 text"), options);
+        return refuse("not UTF-8 text");
     };
     if body.lines().count() > MAX_TEXT_LINES {
-        return plain(
-            &cannot_show(&format!("more than {MAX_TEXT_LINES} lines")),
-            options,
-        );
+        return refuse(&format!("more than {MAX_TEXT_LINES} lines"));
     }
     let longest = longest_run(&body, '`');
     let fence = "`".repeat(longest.max(2) + 1);
@@ -166,7 +197,7 @@ fn text(
     // looks up a syntax.
     let text = format!("{fence}{extension}\n{body}{newline}{fence}\n");
     let built = document::build(text, Flavor::Gfm, MermaidMode::Off, options.mermaid_width);
-    PreparedDocument::new(built, inline(options))
+    (PreparedDocument::new(built, inline(options)), 1)
 }
 
 fn plain(text: &str, options: &Options) -> PreparedDocument {
