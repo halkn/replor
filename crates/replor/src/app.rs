@@ -458,8 +458,12 @@ impl App {
                 Err(reason) => return self.refuse(format!("cannot show the source: {reason}")),
             },
         }
+        // Both faces are the same file, so a search on one goes on in the
+        // other, as it does across `r` and a resize.
+        let search = std::mem::take(&mut self.state.search);
         self.lay_out_fresh();
         self.scroll_to_file_line(line);
+        self.state.carry_search(search, &self.texts);
         Outcome::Replaced
     }
 

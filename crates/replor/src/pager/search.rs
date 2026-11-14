@@ -98,6 +98,9 @@ pub struct Search {
     query: String,
     matches: Vec<Match>,
     current: Option<usize>,
+    /// The current match is where the next step goes rather than where the
+    /// reader is: it was chosen without going there (`aim_from`).
+    aimed: bool,
 }
 
 impl Search {
@@ -156,6 +159,7 @@ impl Search {
     /// want it near the reader follow with `select_from`.
     pub fn recompute(&mut self, lines: &SearchIndex) {
         self.matches.clear();
+        self.aimed = false;
         if self.query.is_empty() {
             self.current = None;
             return;
@@ -204,6 +208,7 @@ impl Search {
     /// Select the first match at or after `line`, so a search starts from the
     /// current viewport rather than from the top of the document.
     pub fn select_from(&mut self, line: usize) {
+        self.aimed = false;
         if self.matches.is_empty() {
             self.current = None;
             return;
@@ -214,6 +219,18 @@ impl Search {
                 .position(|m| m.line >= line)
                 .unwrap_or(0),
         );
+    }
+
+    /// Select the first match at or after `line` without going to it, so the
+    /// next step goes there and the previous to the one before: none is
+    /// skipped while the reader has seen neither.
+    pub fn aim_from(&mut self, line: usize) {
+        self.select_from(line);
+        self.aimed = self.current.is_some();
+    }
+
+    pub fn is_aimed(&self) -> bool {
+        self.aimed
     }
 
     // mdvu's name, kept so the pager reads as it does there.
@@ -232,6 +249,11 @@ impl Search {
         }
         let len = self.matches.len() as isize;
         let current = self.current.unwrap_or(0) as isize;
+        let delta = if std::mem::take(&mut self.aimed) && delta > 0 {
+            0
+        } else {
+            delta
+        };
         let next = (current + delta).rem_euclid(len) as usize;
         self.current = Some(next);
         self.matches.get(next).copied()
