@@ -319,3 +319,121 @@ fn preview_and_source_show_the_same_line_and_lines() {
     let source = status_bar(&mut app);
     assert_eq!(position(&source), position(&preview), "{source}");
 }
+
+fn search(app: &mut App, query: &str) {
+    app.key(ch('/'));
+    for c in query.chars() {
+        app.key(ch(c));
+    }
+    app.key(key(KeyCode::Enter));
+}
+
+/// The text of the rendered line the current match is on.
+fn current_match(app: &App) -> String {
+    let found = app.state().search.current().expect("a current match");
+    app.rendered().lines[found.line].text()
+}
+
+/// A confirmed search outlives the switch, counted again on the other face,
+/// and `n` goes on through its matches there. The place is kept as before.
+#[test]
+fn a_confirmed_search_is_kept_across_the_switch() {
+    let dir = fixture();
+    let mut app = app(dir.path());
+    app.open(&path("a.md"));
+    // `Line 5.` and `Line 50.` to `Line 59.`.
+    search(&mut app, "line 5");
+    assert_eq!(app.state().search.count(), 11);
+    let line = app.top_line();
+
+    assert_eq!(app.key(ch('s')), Outcome::Replaced);
+    assert_eq!(app.top_line(), line);
+    assert_eq!(app.state().search.query(), "line 5");
+    assert_eq!(app.state().search.count(), 11);
+    let aimed = app.state().search.current();
+    app.key(ch('n'));
+    assert_eq!(app.state().search.current(), aimed);
+    let shown = app.state().search.current().unwrap().line;
+    let top = app.state().viewport.top;
+    assert!((top..top + usize::from(HEIGHT)).contains(&shown), "{shown}");
+    let found = current_match(&app);
+    assert!(found.contains("**Line 5"), "{found}");
+
+    let line = app.top_line().expect("a source line at the top");
+    assert_eq!(app.key(ch('s')), Outcome::Replaced);
+    // From a blank line between paragraphs the preview goes to the next one.
+    let back = app.top_line().expect("a source line at the top");
+    assert!((line..=line + 1).contains(&back), "{line} -> {back}");
+    assert_eq!(app.state().search.count(), 11);
+    app.key(ch('N'));
+    let found = current_match(&app);
+    assert!(found.contains("Line 5") && !found.contains("**"), "{found}");
+}
+
+/// A query only one face has keeps on the other, which says it has none.
+#[test]
+fn a_search_with_no_match_on_the_other_face_says_so() {
+    let dir = fixture();
+    let mut app = app(dir.path());
+    app.open(&path("a.md"));
+    app.key(ch('s'));
+    search(&mut app, "**line");
+    assert_eq!(app.state().search.count(), 60);
+    app.key(ch('s'));
+    assert_eq!(app.state().search.query(), "**line");
+    assert_eq!(app.state().search.count(), 0);
+    let status = status_bar(&mut app);
+    assert!(status.contains("no match: **line"), "{status}");
+    app.key(ch('s'));
+    assert_eq!(app.state().search.count(), 60);
+    let status = status_bar(&mut app);
+    assert!(!status.contains("no match"), "{status}");
+}
+
+/// `line 3` matches `Line 3.` above the place reached, and `Line 30.` to
+/// `Line 39.` below the screen.
+fn past_line_3() -> (tempfile::TempDir, App) {
+    let dir = fixture();
+    let mut app = app(dir.path());
+    app.open(&path("a.md"));
+    search(&mut app, "line 3");
+    assert_eq!(app.state().search.count(), 11);
+    for _ in 0..10 {
+        app.key(ch('j'));
+    }
+    let line = app.top_line().expect("a source line at the top");
+    assert!(7 < line && line + 20 < 61, "{line}");
+    (dir, app)
+}
+
+/// After the switch `n` goes to the first match below the top, though it is
+/// off the screen, and `N` to the last above it: none is skipped.
+#[test]
+fn after_the_switch_n_and_n_go_to_the_nearest_matches() {
+    let (_dir, mut app) = past_line_3();
+    app.key(ch('s'));
+    app.key(ch('n'));
+    let found = current_match(&app);
+    assert!(found.contains("**Line 30.**"), "{found}");
+
+    let (_dir, mut app) = past_line_3();
+    app.key(ch('s'));
+    app.key(ch('N'));
+    let found = current_match(&app);
+    assert!(found.contains("**Line 3.**"), "{found}");
+    let status = status_bar(&mut app);
+    assert!(!status.contains("wrapped"), "{status}");
+}
+
+/// A status said of the face left behind is not said of the new one.
+#[test]
+fn the_switch_leaves_the_status_of_the_other_face() {
+    let (_dir, mut app) = past_line_3();
+    // From `Line 3.`, the first match, back past the top to the last.
+    app.key(ch('N'));
+    let status = status_bar(&mut app);
+    assert!(status.contains("wrapped"), "{status}");
+    app.key(ch('s'));
+    let status = status_bar(&mut app);
+    assert!(!status.contains("wrapped"), "{status}");
+}

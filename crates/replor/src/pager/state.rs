@@ -299,6 +299,8 @@ impl PagerState {
             return;
         }
         let before = self.search.position();
+        let aimed = self.search.is_aimed();
+        let top = self.viewport.top;
         let found = if forward {
             self.search.next()
         } else {
@@ -308,11 +310,15 @@ impl PagerState {
             Some(m) => {
                 self.reveal(m.line);
                 // Cycling past either end is easy to mistake for "no more
-                // matches", so say that it happened.
-                if let (Some(before), Some(after)) = (before, self.search.position())
-                    && self.search.count() > 1
-                    && (forward && after <= before || !forward && after >= before)
-                {
+                // matches", so say that it happened. From an aimed match the
+                // reader stands at the top of the screen, not on a match.
+                let wrapped = if aimed {
+                    forward && m.line < top || !forward && m.line >= top
+                } else {
+                    matches!((before, self.search.position()), (Some(before), Some(after))
+                        if forward && after <= before || !forward && after >= before)
+                };
+                if wrapped && self.search.count() > 1 {
                     self.status = Some("wrapped".to_string());
                 }
             }
@@ -370,6 +376,19 @@ impl PagerState {
             session.preview.recompute(lines);
             session.preview.select_from(top);
         }
+    }
+
+    /// A confirmed search carried over to another surface, its matches
+    /// counted again there without moving to one: the place is kept by other
+    /// means. `n` and `N` then go to the nearest matches below and above the
+    /// top. A query with no match there says so, as confirming it would.
+    pub fn carry_search(&mut self, search: Search, lines: &SearchIndex) {
+        self.search = search;
+        self.recompute_searches(lines);
+        self.search.aim_from(self.viewport.top);
+        // Any status was said of the surface left behind.
+        self.status = (self.search.is_active() && self.search.count() == 0)
+            .then(|| format!("no match: {}", self.search.query()));
     }
 
     pub fn confirm_search(&mut self, lines: &SearchIndex) {
