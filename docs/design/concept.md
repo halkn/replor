@@ -207,7 +207,7 @@ mdvu のリポジトリを土台にする案（halkn/mdvu を halkn/replor に�
 | P1 Core ＋ Explorer | mdvu の描画コードの取り込みと crate 化、Snapshot の trait、作業ツリーの Files lens | 主要ユースケース 2 |
 | P2 Wiki | Wiki lens と Azure Wiki のナビゲーション（`.order`・`[[_TOSP_]]`・リンク解決） | 主要ユースケース 1。docsail をアーカイブできる |
 | P3 PR | PR 一覧・fetch・PR head Snapshot・Changes lens・PR lens | 主要ユースケース 3〜5 |
-| P4 Local changes | 作業ツリーの uncommitted / branch の Comparison | 主要ユースケース 6 |
+| P4 Local changes | 作業ツリーの uncommitted / branch の Comparison、Files lens の Git status マーク | 主要ユースケース 6 |
 | P5 mdvu の統合 | 単一ファイルモード（pager、stdout への描画、stdin、`--watch`、`--line`） | 主要ユースケース 7。mdvu をアーカイブできる |
 
 ## Acceptance Criteria
@@ -215,8 +215,8 @@ mdvu のリポジトリを土台にする案（halkn/mdvu を halkn/replor に�
 概念設計としての受け入れ条件。各フェーズの Issue で具体化する。
 
 - [ ] 同じ Preview・Files lens・Wiki lens が、作業ツリーとリビジョン（PR head）の両方で動く。ビューのコードに作業ツリー専用の分岐がない。
-- [ ] 描画コアの crate が git・サブプロセス・ネットワーク・Ratatui に依存しない（`cargo tree` で確認できる）。
-- [ ] 描画コアを取り込んだ後も、mdvu の `tests/render.rs` の snapshot が仕様変更の理由なしに変わらない（snapshot ごと replor に取り込み、同じ入力で比べる）。
+- [x] 描画コアの crate が git・サブプロセス・ネットワーク・Ratatui に依存しない（`cargo tree` で確認できる）。
+- [x] 描画コアを取り込んだ後も、mdvu の `tests/render.rs` の snapshot が仕様変更の理由なしに変わらない（snapshot ごと replor に取り込み、同じ入力で比べる）。
 - [ ] PR を選んで閲覧した前後で、`git status --porcelain=v2`、`git rev-parse HEAD`、`git symbolic-ref HEAD`、`.git/index` のハッシュ、`git for-each-ref` の結果のうち本ツール専用の名前空間以外が一致する。
 - [ ] PR の変更ファイル一覧が、GitHub では `gh pr diff <N> --name-only` と一致する。Azure DevOps でもプロバイダーが返す変更ファイル一覧と一致する（比較手段は P3 で確定）。
 - [ ] ネットワークなし・`gh` / `az` なしで、Files lens・Wiki lens・Preview・Local changes が動き、PR lens だけが理由付きで Unavailable になる。
