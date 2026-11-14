@@ -8,8 +8,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use common::{ch, focus_preview, key, new_app, options, path, rendered_text, screen};
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use replor::app::Outcome;
+use replor::finder::Progress;
 use replor::start;
 use replor_render::flavor::Flavor;
 
@@ -84,4 +85,30 @@ fn the_p0_results_link_reaches_its_japanese_heading_and_back() {
     assert_eq!(app.top_line(), Some(21), "{:?}", app.state().status);
     app.key(ch('['));
     assert_eq!(app.top_line(), before);
+}
+
+/// `Ctrl-p` and a few letters of the name reach a file outside `docs/` as
+/// well as inside it.
+#[test]
+fn the_finder_opens_the_p1_core_design_by_a_few_letters() {
+    let start = start::resolve(None, repository()).unwrap();
+    let mut app = new_app(
+        Arc::new(start.snapshot),
+        start.top,
+        options(Flavor::AzureDevops, false),
+        140,
+        40,
+    );
+    app.key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+    while app.candidates().progress() == Progress::Listing {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        app.tick();
+    }
+    app.tick();
+    assert_eq!(app.candidates().progress(), Progress::Complete);
+    for c in "p1co".chars() {
+        app.key(ch(c));
+    }
+    assert_eq!(app.key(key(KeyCode::Enter)), Outcome::Replaced);
+    assert_eq!(app.opened().unwrap().as_str(), "docs/design/p1-core.md");
 }

@@ -14,14 +14,15 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Clear, Paragraph};
 use replor_render::error::AppError;
 use replor_render::layout::theme::Theme;
 use replor_render::layout::{LayoutOptions, RenderedDocument, StyleRole, layout_document};
 use replor_render::markdown::model::{Document, headings};
 use replor_render::navigation::{Anchor, Link, Target, anchors, links};
-use replor_render::snapshot::{EntryKind, Snapshot, SnapshotPath};
+use replor_render::snapshot::{EntryKind, Snapshot, SnapshotPath, WalkLimits};
 
+use crate::finder::{self, Candidates, Finder, Progress};
 use crate::navigate::{self, Destination, History, Place};
 use crate::pager::TerminalGuard;
 use crate::pager::event::{Input, map};
@@ -32,12 +33,18 @@ use crate::pager::state::{
     Action, Mode, OutlineItem, PagerState, ViewportAnchor, rendered_line_for_position,
     rendered_line_for_source, source_line_at, source_position_at,
 };
-use crate::pager::view::{self, LinkBar, ViewContext, convert, elide_end, help_rows, widest_line};
+use crate::pager::view::{
+    self, LinkBar, ViewContext, convert, elide_end, elide_start, help_rows, outline_window,
+    overlay_area, widest_line,
+};
 use crate::preview::{self, Content, Options};
 use crate::tree::{Opened, Tree};
 
 /// How long a frame waits for input before looping again.
 const POLL: Duration = Duration::from_millis(250);
+
+/// Matches the finder shows at once, when the screen is tall enough.
+const FINDER_ROWS: usize = 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -63,6 +70,8 @@ pub enum Command {
     Forward,
     /// Shows a Markdown file as its text, or its text as Markdown again.
     ToggleSource,
+    /// Opens the prompt that finds a file by its path.
+    FindFile,
     Preview(Input),
     Ignored,
 }
@@ -76,6 +85,7 @@ pub fn route(focus: Focus, mode: Mode, key: KeyEvent) -> Command {
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         return match (focus, key.code) {
             (_, KeyCode::Char('c')) => Command::Quit,
+            (_, KeyCode::Char('p')) => Command::FindFile,
             (Focus::Preview, _) => Command::Preview(map(key, mode)),
             (Focus::Tree, _) => Command::Ignored,
         };
@@ -159,6 +169,11 @@ pub struct App {
     anchors: Vec<Anchor>,
     selected_link: Option<usize>,
     link_bar: Option<LinkBar>,
+    /// Every file, for the finder, listed again by `r`.
+    candidates: Candidates,
+    limits: WalkLimits,
+    /// The finder while it is open. It owns every key then.
+    finder: Option<Finder>,
 }
 
 impl App {
@@ -176,6 +191,7 @@ impl App {
         };
         let content = preview::notice(&message, &options);
         let (tree_area, preview_area) = split(size);
+        let candidates = Candidates::start(Arc::clone(&snapshot), finder::LIMITS);
         let mut app = Self {
             snapshot,
             tree,
@@ -196,6 +212,9 @@ impl App {
             anchors: Vec::new(),
             selected_link: None,
             link_bar: None,
+            candidates,
+            limits: finder::LIMITS,
+            finder: None,
         };
         app.lay_out_fresh();
         app
@@ -247,7 +266,40 @@ impl App {
         })
     }
 
+    /// Lists the files for the finder again, within other limits.
+    pub fn list_files_within(&mut self, limits: WalkLimits) {
+        self.limits = limits;
+        self.candidates = Candidates::start(Arc::clone(&self.snapshot), limits);
+        self.refresh_finder(true);
+    }
+
+    /// Takes the files listed since the last frame. The frame loop calls it
+    /// between key presses, so the listing never holds up a key.
+    pub fn tick(&mut self) {
+        if self.candidates.receive() {
+            self.refresh_finder(false);
+        }
+    }
+
+    /// The finder, if it is open.
+    pub fn finder(&self) -> Option<&Finder> {
+        self.finder.as_ref()
+    }
+
+    pub fn candidates(&self) -> &Candidates {
+        &self.candidates
+    }
+
+    fn refresh_finder(&mut self, query_changed: bool) {
+        if let Some(finder) = &mut self.finder {
+            finder.refresh(self.candidates.entries(), query_changed);
+        }
+    }
+
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
+        if self.finder.is_some() {
+            return self.finder_key(key);
+        }
         match route(self.focus, self.state.mode(), key) {
             Command::Quit => return Outcome::Quit,
             Command::SwitchFocus => {
@@ -275,6 +327,10 @@ impl App {
             Command::Back => return self.go(Direction::Back),
             Command::Forward => return self.go(Direction::Forward),
             Command::ToggleSource => return self.toggle_source(),
+            Command::FindFile => {
+                self.finder = Some(Finder::default());
+                self.refresh_finder(true);
+            }
             Command::Preview(input) => {
                 // Any other move leaves the link that was selected.
                 if matches!(input, Input::Navigate(_)) {
@@ -286,6 +342,42 @@ impl App {
                 }
             }
             Command::Ignored => {}
+        }
+        Outcome::Continue
+    }
+
+    /// A key while the finder is open. A file chosen there opens as one
+    /// chosen in the tree does: the tree follows, and nothing is added to
+    /// Back / Forward.
+    fn finder_key(&mut self, key: KeyEvent) -> Outcome {
+        let Some(finder) = &mut self.finder else {
+            return Outcome::Continue;
+        };
+        let control = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Char('c') if control => return Outcome::Quit,
+            KeyCode::Esc => self.finder = None,
+            KeyCode::Enter => {
+                let chosen = finder.chosen(self.candidates.entries()).cloned();
+                if let Some(entry) = chosen {
+                    self.finder = None;
+                    return self.show(Opened::File(entry));
+                }
+            }
+            KeyCode::Up => finder.move_by(-1),
+            KeyCode::Down => finder.move_by(1),
+            KeyCode::Char('p') if control => finder.move_by(-1),
+            KeyCode::Char('n') if control => finder.move_by(1),
+            KeyCode::Backspace => {
+                if finder.query.pop().is_some() {
+                    self.refresh_finder(true);
+                }
+            }
+            KeyCode::Char(c) if !control && !key.modifiers.contains(KeyModifiers::ALT) => {
+                finder.query.push(c);
+                self.refresh_finder(true);
+            }
+            _ => {}
         }
         Outcome::Continue
     }
@@ -563,6 +655,7 @@ impl App {
     /// The tree and the open file read again, the place in the file kept.
     fn reload(&mut self) {
         self.tree.reload();
+        self.list_files_within(self.limits);
         if let Some(path) = self.opened.clone() {
             let rendering = preview::open(&self.snapshot, &path, &self.options);
             let mut refused = None;
@@ -685,6 +778,68 @@ impl App {
             &self.state,
             &ctx,
         );
+        self.draw_finder(frame);
+    }
+
+    /// Drawn over both panes, like the heading list over the preview.
+    fn draw_finder(&self, frame: &mut Frame) {
+        let Some(finder) = &self.finder else {
+            return;
+        };
+        let screen = frame.area();
+        let body = Rect {
+            height: screen.height.saturating_sub(1),
+            ..screen
+        };
+        // A fixed size, so the box does not jump as the matches change.
+        let area = overlay_area(body, 1 + FINDER_ROWS);
+        let inner_width = area.width.saturating_sub(2) as usize;
+        let inner_height = area.height.saturating_sub(2) as usize;
+        let style = |role| convert(self.theme.style(role));
+        let query = replor_render::text::visible(&finder.query);
+        let prompt = elide_start(&format!("> {query}"), inner_width.saturating_sub(1));
+        let mut rows = vec![Line::from(vec![
+            Span::styled(prompt, style(StyleRole::Normal)),
+            // The caret: the terminal cursor stays hidden.
+            Span::styled(
+                " ",
+                style(StyleRole::Normal).add_modifier(Modifier::REVERSED),
+            ),
+        ])];
+        let entries = self.candidates.entries();
+        let window = outline_window(
+            finder.selected,
+            finder.matches.len(),
+            inner_height.saturating_sub(1),
+        );
+        rows.extend(window.map(|index| {
+            let path = entries[finder.matches[index]].entry.path.as_str();
+            // A path is the snapshot's, and may hold terminal controls. The
+            // start is cut, so the file name stays.
+            let label = elide_start(&replor_render::text::visible(path), inner_width);
+            let role = match index == finder.selected {
+                true => StyleRole::SearchMatch,
+                false => StyleRole::Normal,
+            };
+            Line::from(Span::styled(label, style(role)))
+        }));
+        if finder.matches.is_empty() && inner_height > 1 {
+            rows.push(Line::from(Span::styled(
+                "no match",
+                style(StyleRole::Muted),
+            )));
+        }
+        let progress = match self.candidates.progress() {
+            Progress::Listing => " · listing…",
+            Progress::Complete => "",
+            Progress::Partial => " · partial: limit reached",
+        };
+        let title = format!("Files {}/{}{progress}", finder.matches.len(), entries.len());
+        let block = Block::bordered()
+            .title(title)
+            .border_style(style(StyleRole::CodeBorder));
+        frame.render_widget(Clear, area);
+        frame.render_widget(Paragraph::new(rows).block(block), area);
     }
 
     fn draw_tree(&mut self, frame: &mut Frame) {
@@ -774,7 +929,8 @@ impl App {
 
     /// The images on screen this frame, placed inside the preview pane.
     pub fn images(&self) -> Vec<Placed> {
-        if !self.state.shows_images() {
+        // An image is drawn over the cells, so it would cover an overlay.
+        if !self.state.shows_images() || self.finder.is_some() {
             return Vec::new();
         }
         let viewport = &self.state.viewport;
@@ -838,6 +994,7 @@ pub fn run(mut app: App) -> Result<(), AppError> {
         // not re-send image payloads that can be megabytes each.
         let mut images = ImageSession::new(app.options.images.map(|support| support.protocol));
         loop {
+            app.tick();
             let wanted = app.images();
             // Kitty removes its own placements. iTerm2 draws into the cells,
             // so the only way back is to make `ratatui` repaint everything.
@@ -899,6 +1056,7 @@ mod tests {
             "Esc" => KeyCode::Esc,
             "Enter" => KeyCode::Enter,
             "Tab" => KeyCode::Tab,
+            "Backspace" => KeyCode::Backspace,
             other => {
                 let mut chars = other.chars();
                 let c = chars.next().expect("a key name");
@@ -1042,6 +1200,143 @@ mod tests {
         app.resize(Rect::new(0, 0, 50, 30));
         assert!(app.rendered().lines.len() > wide);
         assert!(app.state().viewport.width <= 30);
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    fn type_text(app: &mut App, text: &str) {
+        for c in text.chars() {
+            app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+    }
+
+    fn listed(app: &mut App) {
+        app.candidates.wait();
+        app.refresh_finder(false);
+    }
+
+    fn screen(app: &mut App) -> String {
+        let backend = ratatui::backend::TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn selected_in_tree(app: &App) -> &str {
+        app.tree().rows()[app.tree().selected()].entry.path.as_str()
+    }
+
+    fn linked_fixture() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        write(&dir.path().join("a.md"), "# A\n\n[to b](b.md)\n");
+        write(&dir.path().join("b.md"), "# Bravo\n");
+        write(&dir.path().join("docs/guide/charlie.md"), "# Charlie\n");
+        dir
+    }
+
+    #[test]
+    fn a_file_found_by_its_path_opens_as_from_the_tree() {
+        let dir = linked_fixture();
+        let mut app = app(dir.path(), "");
+        app.open(&SnapshotPath::new("a.md").unwrap());
+        app.key(parse("Tab"));
+        app.key(parse("f"));
+        assert_eq!(app.key(parse("Enter")), Outcome::Replaced);
+        assert_eq!(app.opened().unwrap().as_str(), "b.md");
+
+        // From either pane.
+        app.key(ctrl('p'));
+        listed(&mut app);
+        type_text(&mut app, "chr");
+        let finder = app.finder().unwrap();
+        assert_eq!(finder.query, "chr");
+        assert_eq!(finder.matches.len(), 1);
+        assert_eq!(app.key(parse("Enter")), Outcome::Replaced);
+        assert!(app.finder().is_none());
+        assert_eq!(app.opened().unwrap().as_str(), "docs/guide/charlie.md");
+        assert!(text(&app).contains("Charlie"), "{}", text(&app));
+        assert_eq!(selected_in_tree(&app), "docs/guide/charlie.md");
+
+        // Only the link was recorded, so Back leaves `b.md` out.
+        app.key(parse("["));
+        assert_eq!(app.opened().unwrap().as_str(), "a.md");
+        app.key(parse("]"));
+        assert_eq!(app.opened().unwrap().as_str(), "docs/guide/charlie.md");
+        app.key(parse("]"));
+        assert_eq!(app.opened().unwrap().as_str(), "docs/guide/charlie.md");
+    }
+
+    #[test]
+    fn the_finder_takes_every_key_and_esc_leaves_things_as_they_were() {
+        let dir = linked_fixture();
+        let mut app = app(dir.path(), "");
+        assert_eq!(app.key(ctrl('p')), Outcome::Continue);
+        listed(&mut app);
+        // Keys that quit or reload elsewhere are text here.
+        type_text(&mut app, "qr");
+        assert_eq!(app.finder().unwrap().query, "qr");
+        app.key(parse("Backspace"));
+        app.key(parse("Backspace"));
+        assert_eq!(app.finder().unwrap().matches.len(), 3);
+        app.key(parse("Down"));
+        app.key(ctrl('n'));
+        app.key(ctrl('p'));
+        assert_eq!(app.finder().unwrap().selected, 1);
+        assert_eq!(app.key(parse("Esc")), Outcome::Continue);
+        assert!(app.finder().is_none());
+        assert!(app.opened().is_none());
+        assert_eq!(app.focus(), Focus::Tree);
+    }
+
+    #[test]
+    fn the_finder_shows_its_matches_and_a_partial_listing() {
+        let dir = linked_fixture();
+        let mut app = app(dir.path(), "");
+        app.key(ctrl('p'));
+        listed(&mut app);
+        let drawn = screen(&mut app);
+        assert!(drawn.contains("Files 3/3"), "{drawn}");
+        assert!(drawn.contains("docs/guide/charlie.md"), "{drawn}");
+        assert!(!drawn.contains("partial"), "{drawn}");
+        type_text(&mut app, "zzz");
+        assert!(screen(&mut app).contains("no match"));
+
+        app.key(parse("Esc"));
+        app.list_files_within(WalkLimits {
+            entries: 2,
+            depth: 64,
+        });
+        app.key(ctrl('p'));
+        listed(&mut app);
+        let drawn = screen(&mut app);
+        assert!(
+            drawn.contains("Files 2/2 · partial: limit reached"),
+            "{drawn}"
+        );
+    }
+
+    #[test]
+    fn reload_lists_the_files_again() {
+        let dir = linked_fixture();
+        let mut app = app(dir.path(), "");
+        listed(&mut app);
+        write(&dir.path().join("delta.md"), "# Delta\n");
+        app.key(parse("r"));
+        app.key(ctrl('p'));
+        listed(&mut app);
+        type_text(&mut app, "delta");
+        assert_eq!(app.finder().unwrap().matches.len(), 1);
     }
 
     #[test]

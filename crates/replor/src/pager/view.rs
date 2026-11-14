@@ -213,7 +213,7 @@ fn draw_outline(frame: &mut Frame, state: &PagerState, ctx: &ViewContext<'_>, bo
 
 /// Which items are on screen: the selection stays visible without moving the
 /// window more than it has to.
-fn outline_window(selected: usize, total: usize, height: usize) -> std::ops::Range<usize> {
+pub fn outline_window(selected: usize, total: usize, height: usize) -> std::ops::Range<usize> {
     if height == 0 || total == 0 {
         return 0..0;
     }
@@ -230,7 +230,7 @@ pub fn help_rows(body_height: usize) -> usize {
     height.saturating_sub(2) as usize
 }
 
-fn overlay_area(body: Rect, items: usize) -> Rect {
+pub fn overlay_area(body: Rect, items: usize) -> Rect {
     let width = body.width.saturating_sub(4).clamp(1, 60).max(1);
     let height = (items as u16 + 2).min(body.height.saturating_sub(2).max(3));
     let x = body.x + (body.width.saturating_sub(width)) / 2;
