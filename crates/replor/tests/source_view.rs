@@ -112,6 +112,57 @@ fn back_from_the_source_is_the_rendering_kept_from_before() {
     );
 }
 
+/// The source is the text the rendering was made from, so the two show the
+/// same version of the file: only `r` reads it again.
+#[test]
+fn the_source_is_the_text_the_rendering_was_made_from() {
+    let dir = fixture();
+    let mut app = app(dir.path());
+    app.open(&path("b.md"));
+    write(&dir.path().join("b.md"), "# B\n\nNow **bolder** text.\n");
+    assert_eq!(app.key(ch('s')), Outcome::Replaced);
+    let text = rendered_text(&app);
+    assert!(
+        text.contains("**bold**") && !text.contains("bolder"),
+        "{text}"
+    );
+    assert_eq!(app.key(ch('r')), Outcome::Replaced);
+    assert!(
+        rendered_text(&app).contains("**bolder**"),
+        "{}",
+        rendered_text(&app)
+    );
+}
+
+/// A symlink's source is the text the rendering followed it to.
+#[test]
+fn the_source_of_a_symlink_is_the_file_it_leads_to() {
+    let dir = fixture();
+    std::os::unix::fs::symlink("b.md", dir.path().join("link.md")).unwrap();
+    let mut app = app(dir.path());
+    app.open(&path("link.md"));
+    assert_eq!(app.key(ch('s')), Outcome::Replaced, "{}", refusal(&app));
+    assert!(
+        rendered_text(&app).contains("**bold**"),
+        "{}",
+        rendered_text(&app)
+    );
+}
+
+/// A file the rendering could not read has no text to show as source, only
+/// the notice in its place.
+#[test]
+fn a_markdown_file_that_was_not_read_has_no_source() {
+    let dir = fixture();
+    std::fs::write(dir.path().join("bad.md"), b"# Bad\n\n\xff\n").unwrap();
+    let mut app = app(dir.path());
+    app.open(&path("bad.md"));
+    let before = rendered_text(&app);
+    assert_eq!(app.key(ch('s')), Outcome::Continue);
+    assert_eq!(rendered_text(&app), before);
+    assert!(refusal(&app).contains("UTF-8"), "{}", refusal(&app));
+}
+
 fn refusal(app: &App) -> String {
     app.link_bar()
         .filter(|bar| bar.refused)

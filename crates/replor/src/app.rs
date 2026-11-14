@@ -449,7 +449,7 @@ impl App {
         let line = self.top_line().unwrap_or(1);
         match self.rendering.take() {
             Some(rendering) => self.content = rendering,
-            None => match preview::source(&self.snapshot, &path, &self.options) {
+            None => match preview::source(&self.content, &path, &self.options) {
                 Ok(source) => self.rendering = Some(std::mem::replace(&mut self.content, source)),
                 // The rendering stays, so the reader keeps their place.
                 Err(reason) => return self.refuse(format!("cannot show the source: {reason}")),
@@ -522,7 +522,7 @@ impl App {
             // can show.
             self.content = match self.rendering.take() {
                 None => rendering,
-                Some(_) => match preview::source(&self.snapshot, &path, &self.options) {
+                Some(_) => match preview::source(&rendering, &path, &self.options) {
                     Ok(source) => {
                         self.rendering = Some(rendering);
                         source
