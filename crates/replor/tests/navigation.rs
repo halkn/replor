@@ -1,24 +1,15 @@
 //! Following links in the preview, and Back / Forward, on a fixture
 //! repository built in a temporary directory.
 
+mod common;
+
 use std::path::Path;
-use std::sync::Arc;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::Rect;
+use common::{ch, key, path, write};
+use crossterm::event::KeyCode;
 use replor::app::{App, Outcome};
-use replor::preview::Options;
-use replor_render::diagram::{MermaidMode, MermaidWidth};
 use replor_render::flavor::Flavor;
-use replor_render::layout::icons::IconSet;
-use replor_render::layout::theme::{Theme, Variant};
 use replor_render::snapshot::SnapshotPath;
-use replor_snapshot::WorktreeSnapshot;
-
-fn write(path: &Path, text: &str) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, text).unwrap();
-}
 
 /// Enough filler that a heading is below the first screen, and, after it,
 /// that the heading can be scrolled to the top.
@@ -61,37 +52,7 @@ fn fixture() -> tempfile::TempDir {
 }
 
 fn app(dir: &Path, flavor: Flavor) -> App {
-    let options = Options {
-        flavor,
-        mermaid: MermaidMode::Unicode,
-        mermaid_width: MermaidWidth::Unicode,
-        highlight: false,
-        images: None,
-        icons: IconSet::Unicode,
-    };
-    let snapshot = WorktreeSnapshot::open(&dir.join("repo")).unwrap();
-    let mut app = App::new(
-        Arc::new(snapshot),
-        SnapshotPath::new("docs").unwrap(),
-        options,
-        Theme::new(Variant::Dark),
-        Rect::new(0, 0, 100, 20),
-    );
-    // The preview takes the keys from here on.
-    app.key(key(KeyCode::Tab));
-    app
-}
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
-fn ch(c: char) -> KeyEvent {
-    key(KeyCode::Char(c))
-}
-
-fn path(text: &str) -> SnapshotPath {
-    SnapshotPath::new(text).unwrap()
+    common::app(&dir.join("repo"), "docs", flavor, 100, 20)
 }
 
 /// Selects the `n`th link (1-based) from the top and follows it.
@@ -207,8 +168,6 @@ fn the_selection_cycles_and_names_the_target() {
 /// line names its destination.
 #[test]
 fn the_selected_link_is_reversed_and_its_destination_shown() {
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
     use ratatui::style::Modifier;
 
     let dir = fixture();
@@ -216,14 +175,7 @@ fn the_selected_link_is_reversed_and_its_destination_shown() {
     app.open(&path("docs/index.md"));
     app.key(ch('f'));
     app.key(ch('f'));
-    let mut terminal = Terminal::new(TestBackend::new(100, 20)).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
-    let buffer = terminal.backend().buffer();
-    let row = |y: u16| -> String {
-        (0..100)
-            .map(|x| buffer[(x, y)].symbol().to_string())
-            .collect()
-    };
+    let buffer = common::draw(&mut app, 100, 20);
     let reversed: String = (0..20)
         .flat_map(|y| (0..100).map(move |x| (x, y)))
         .filter(|&(x, y)| buffer[(x, y)].modifier.contains(Modifier::REVERSED))
@@ -233,7 +185,7 @@ fn the_selected_link_is_reversed_and_its_destination_shown() {
         .map(|(x, y)| buffer[(x, y)].symbol().to_string())
         .collect();
     assert_eq!(reversed, "Here");
-    let bar = row(18);
+    let bar = common::row(&buffer, 18);
     assert!(bar.contains("→ #later-on"), "{bar}");
     assert!(bar.contains("[2/7]"), "{bar}");
 }

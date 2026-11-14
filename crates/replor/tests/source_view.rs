@@ -1,29 +1,18 @@
 //! Switching a Markdown file between its rendering (Preview) and its text
 //! (Source) with `s`, on a fixture repository built in a temporary directory.
 
-use std::path::Path;
-use std::sync::Arc;
+mod common;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-use ratatui::layout::Rect;
+use std::path::Path;
+
+use common::{ch, key, path, rendered_text, write};
+use crossterm::event::KeyCode;
 use replor::app::{App, Outcome};
-use replor::preview::{MAX_TEXT_LINES, Options};
-use replor_render::diagram::{MermaidMode, MermaidWidth};
+use replor::preview::MAX_TEXT_LINES;
 use replor_render::flavor::Flavor;
-use replor_render::layout::icons::IconSet;
-use replor_render::layout::theme::{Theme, Variant};
-use replor_render::snapshot::SnapshotPath;
-use replor_snapshot::WorktreeSnapshot;
 
 const WIDTH: u16 = 100;
 const HEIGHT: u16 = 20;
-
-fn write(path: &Path, text: &str) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, text).unwrap();
-}
 
 /// `a.md` has `**Line i.**` on line `2i + 1`, so a line's text says where it
 /// is in the file, and the emphasis tells Preview from Source.
@@ -41,37 +30,7 @@ fn fixture() -> tempfile::TempDir {
 }
 
 fn app(dir: &Path) -> App {
-    let options = Options {
-        flavor: Flavor::Gfm,
-        mermaid: MermaidMode::Unicode,
-        mermaid_width: MermaidWidth::Unicode,
-        highlight: false,
-        images: None,
-        icons: IconSet::Unicode,
-    };
-    let snapshot = WorktreeSnapshot::open(dir).unwrap();
-    let mut app = App::new(
-        Arc::new(snapshot),
-        SnapshotPath::new("").unwrap(),
-        options,
-        Theme::new(Variant::Dark),
-        Rect::new(0, 0, WIDTH, HEIGHT),
-    );
-    // The preview takes the keys from here on.
-    app.key(key(KeyCode::Tab));
-    app
-}
-
-fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent::new(code, KeyModifiers::NONE)
-}
-
-fn ch(c: char) -> KeyEvent {
-    key(KeyCode::Char(c))
-}
-
-fn path(text: &str) -> SnapshotPath {
-    SnapshotPath::new(text).unwrap()
+    common::app(dir, "", Flavor::Gfm, WIDTH, HEIGHT)
 }
 
 /// The text of the rendered line at the top of the preview.
@@ -79,22 +38,8 @@ fn top_text(app: &App) -> String {
     app.rendered().lines[app.state().viewport.top].text()
 }
 
-fn all_text(app: &App) -> String {
-    app.rendered()
-        .lines
-        .iter()
-        .map(|line| line.text())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn status_bar(app: &mut App) -> String {
-    let mut terminal = Terminal::new(TestBackend::new(WIDTH, HEIGHT)).unwrap();
-    terminal.draw(|frame| app.draw(frame)).unwrap();
-    let buffer = terminal.backend().buffer();
-    (0..WIDTH)
-        .map(|x| buffer[(x, HEIGHT - 1)].symbol().to_string())
-        .collect()
+    common::row(&common::draw(app, WIDTH, HEIGHT), HEIGHT - 1)
 }
 
 #[test]
@@ -130,7 +75,7 @@ fn s_shows_the_source_and_back_at_the_same_line() {
 
     assert_eq!(app.key(ch('s')), Outcome::Replaced);
     assert_eq!(app.top_line(), Some(moved), "source top was: {moved_text}");
-    assert!(!all_text(&app).contains("**"));
+    assert!(!rendered_text(&app).contains("**"));
     assert!(status_bar(&mut app).contains("gfm"));
 }
 
@@ -139,9 +84,9 @@ fn s_is_refused_for_a_file_that_is_not_markdown() {
     let dir = fixture();
     let mut app = app(dir.path());
     app.open(&path("c.rs"));
-    let before = all_text(&app);
+    let before = rendered_text(&app);
     assert_eq!(app.key(ch('s')), Outcome::Continue);
-    assert_eq!(all_text(&app), before);
+    assert_eq!(rendered_text(&app), before);
     assert!(refusal(&app).contains("Markdown"), "{}", refusal(&app));
 
     // The reason belongs to that file, and goes when another opens.
@@ -160,7 +105,7 @@ fn back_from_the_source_is_the_rendering_kept_from_before() {
     app.key(ch('s'));
     write(&dir.path().join("b.md"), "# B\n\nNow **bolder** text.\n");
     assert_eq!(app.key(ch('s')), Outcome::Replaced);
-    let text = all_text(&app);
+    let text = rendered_text(&app);
     assert!(
         text.contains("bold text") && !text.contains("bolder"),
         "{text}"
@@ -181,7 +126,11 @@ fn another_file_opens_in_the_preview() {
     app.open(&path("a.md"));
     app.key(ch('s'));
     app.open(&path("b.md"));
-    assert!(!all_text(&app).contains("**bold**"), "{}", all_text(&app));
+    assert!(
+        !rendered_text(&app).contains("**bold**"),
+        "{}",
+        rendered_text(&app)
+    );
 
     // From a link, then Back and Forward.
     app.open(&path("a.md"));
@@ -190,12 +139,24 @@ fn another_file_opens_in_the_preview() {
     assert_eq!(app.key(key(KeyCode::Enter)), Outcome::Replaced);
     assert_eq!(app.opened(), Some(&path("b.md")));
     app.key(ch('s'));
-    assert!(all_text(&app).contains("**bold**"), "{}", all_text(&app));
+    assert!(
+        rendered_text(&app).contains("**bold**"),
+        "{}",
+        rendered_text(&app)
+    );
     assert_eq!(app.key(ch('[')), Outcome::Replaced);
     assert_eq!(app.opened(), Some(&path("a.md")));
-    assert!(!all_text(&app).contains("**Line"), "{}", all_text(&app));
+    assert!(
+        !rendered_text(&app).contains("**Line"),
+        "{}",
+        rendered_text(&app)
+    );
     assert_eq!(app.key(ch(']')), Outcome::Replaced);
-    assert!(!all_text(&app).contains("**bold**"), "{}", all_text(&app));
+    assert!(
+        !rendered_text(&app).contains("**bold**"),
+        "{}",
+        rendered_text(&app)
+    );
 }
 
 #[test]
@@ -206,10 +167,18 @@ fn reload_keeps_the_source() {
     app.key(ch('s'));
     write(&dir.path().join("b.md"), "# B\n\nNow **bolder** text.\n");
     assert_eq!(app.key(ch('r')), Outcome::Replaced);
-    assert!(all_text(&app).contains("**bolder**"), "{}", all_text(&app));
+    assert!(
+        rendered_text(&app).contains("**bolder**"),
+        "{}",
+        rendered_text(&app)
+    );
     // The rendering kept aside was read again too.
     app.key(ch('s'));
-    assert!(all_text(&app).contains("bolder"), "{}", all_text(&app));
+    assert!(
+        rendered_text(&app).contains("bolder"),
+        "{}",
+        rendered_text(&app)
+    );
 }
 
 /// The rendering stays, at the same place, with the reason in the link bar.
@@ -226,9 +195,9 @@ fn the_source_of_a_long_markdown_file_is_not_shown() {
         app.key(ch('j'));
     }
     let line = app.top_line();
-    let before = all_text(&app);
+    let before = rendered_text(&app);
     assert_eq!(app.key(ch('s')), Outcome::Continue);
-    assert_eq!(all_text(&app), before);
+    assert_eq!(rendered_text(&app), before);
     assert_eq!(app.top_line(), line);
     assert!(refusal(&app).contains("more than"), "{}", refusal(&app));
 }
