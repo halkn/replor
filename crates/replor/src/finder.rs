@@ -7,7 +7,9 @@
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use replor_render::snapshot::{Entry, Snapshot, WalkLimits, Walked, walk};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// replor-go's bounds (`docs/plans/initial/DESIGN.md`, 6.2).
 pub const LIMITS: WalkLimits = WalkLimits {
@@ -29,7 +31,7 @@ pub enum Progress {
 }
 
 enum Message {
-    Entries(Vec<Entry>),
+    Entries(Vec<Candidate>),
     Done(Result<Walked, String>),
 }
 
@@ -64,7 +66,8 @@ impl Candidates {
         std::thread::spawn(move || {
             let mut batch = Vec::new();
             let walked = walk(&*snapshot, limits, |entry| {
-                batch.push(entry);
+                // Lowercased here, so the frame loop only appends.
+                batch.push(Candidate::new(entry));
                 if batch.len() < BATCH {
                     return true;
                 }
@@ -72,10 +75,9 @@ impl Candidates {
                     .send(Message::Entries(std::mem::take(&mut batch)))
                     .is_ok()
             });
-            if walked.as_ref().ok() != Some(&Walked::Stopped) {
-                let _ = sender.send(Message::Entries(batch));
-                let _ = sender.send(Message::Done(walked.map_err(|err| err.to_string())));
-            }
+            // Nobody receives these once the walk was stopped.
+            let _ = sender.send(Message::Entries(batch));
+            let _ = sender.send(Message::Done(walked.map_err(|err| err.to_string())));
         });
         Self {
             entries: Vec::new(),
@@ -121,13 +123,11 @@ impl Candidates {
 
     fn take(&mut self, message: Message) {
         match message {
-            Message::Entries(entries) => {
-                self.entries.extend(entries.into_iter().map(Candidate::new))
-            }
+            Message::Entries(entries) => self.entries.extend(entries),
             Message::Done(walked) => {
                 self.progress = match walked {
                     Ok(Walked::Complete) => Progress::Complete,
-                    Ok(Walked::Partial | Walked::Stopped) => Progress::Partial,
+                    Ok(_) => Progress::Partial,
                     Err(reason) => Progress::Failed(reason),
                 };
                 self.receiver = None;
@@ -162,10 +162,8 @@ pub fn rank(candidates: &[Candidate], query: &str) -> Vec<usize> {
             Some((score, index))
         })
         .collect();
-    matches.sort_by(|(a, i), (b, j)| {
-        a.cmp(b)
-            .then_with(|| candidates[*i].entry.path.cmp(&candidates[*j].entry.path))
-    });
+    // No two keys are equal, as the path tells them apart.
+    matches.sort_unstable_by_key(|&(score, index)| (score, &candidates[index].entry.path));
     matches.into_iter().map(|(_, index)| index).collect()
 }
 
@@ -182,15 +180,74 @@ fn fuzzy_score(value: &str, query: &str) -> Option<usize> {
     Some(score)
 }
 
+/// What a key does while the finder is open, which is every key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinderInput {
+    Type(char),
+    Erase,
+    Move(isize),
+    Open,
+    Close,
+    Quit,
+    Ignored,
+}
+
+pub fn map(key: KeyEvent) -> FinderInput {
+    let control = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Char('c') if control => FinderInput::Quit,
+        KeyCode::Char('p') if control => FinderInput::Move(-1),
+        KeyCode::Char('n') if control => FinderInput::Move(1),
+        KeyCode::Char(c) if !control && !key.modifiers.contains(KeyModifiers::ALT) => {
+            FinderInput::Type(c)
+        }
+        KeyCode::Up => FinderInput::Move(-1),
+        KeyCode::Down => FinderInput::Move(1),
+        KeyCode::Backspace => FinderInput::Erase,
+        KeyCode::Enter => FinderInput::Open,
+        KeyCode::Esc => FinderInput::Close,
+        _ => FinderInput::Ignored,
+    }
+}
+
 /// The open prompt: what has been typed and which match is selected.
 #[derive(Debug, Default)]
 pub struct Finder {
-    pub query: String,
-    pub matches: Vec<usize>,
-    pub selected: usize,
+    query: String,
+    matches: Vec<usize>,
+    selected: usize,
 }
 
 impl Finder {
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    /// Indices into the candidates, best first.
+    pub fn matches(&self) -> &[usize] {
+        &self.matches
+    }
+
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    pub fn push(&mut self, c: char) {
+        self.query.push(c);
+    }
+
+    /// Removes the last grapheme, so a combining mark goes with its letter.
+    /// Returns whether there was one.
+    pub fn erase(&mut self) -> bool {
+        match self.query.grapheme_indices(true).next_back() {
+            Some((at, _)) => {
+                self.query.truncate(at);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Ranks the candidates again. The selection stays on the same file
     /// while more of them arrive, and goes back to the best match when the
     /// query changes.
@@ -284,6 +341,36 @@ mod tests {
     }
 
     #[test]
+    fn every_key_is_the_finder_s_while_it_is_open() {
+        let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+        // Letters that quit or reload elsewhere are text here.
+        assert_eq!(map(key(KeyCode::Char('q'))), FinderInput::Type('q'));
+        assert_eq!(map(key(KeyCode::Char('r'))), FinderInput::Type('r'));
+        assert_eq!(map(ctrl('p')), FinderInput::Move(-1));
+        assert_eq!(map(ctrl('n')), FinderInput::Move(1));
+        assert_eq!(map(key(KeyCode::Up)), FinderInput::Move(-1));
+        assert_eq!(map(key(KeyCode::Down)), FinderInput::Move(1));
+        assert_eq!(map(key(KeyCode::Backspace)), FinderInput::Erase);
+        assert_eq!(map(key(KeyCode::Enter)), FinderInput::Open);
+        assert_eq!(map(key(KeyCode::Esc)), FinderInput::Close);
+        assert_eq!(map(ctrl('c')), FinderInput::Quit);
+        assert_eq!(map(ctrl('x')), FinderInput::Ignored);
+    }
+
+    #[test]
+    fn erase_takes_a_whole_grapheme() {
+        let mut finder = Finder::default();
+        for c in "ae\u{301}".chars() {
+            finder.push(c);
+        }
+        assert!(finder.erase());
+        assert_eq!(finder.query(), "a");
+        assert!(finder.erase());
+        assert!(!finder.erase());
+    }
+
+    #[test]
     fn the_selection_stays_on_its_file_while_candidates_arrive() {
         let mut all = candidates(&["b.md", "c.md"]);
         let mut finder = Finder::default();
@@ -293,10 +380,10 @@ mod tests {
         all.extend(candidates(&["a.md"]));
         finder.refresh(&all, false);
         assert_eq!(finder.chosen(&all).unwrap().path.as_str(), "c.md");
-        finder.query.push('b');
+        finder.push('b');
         finder.refresh(&all, true);
         assert_eq!(finder.chosen(&all).unwrap().path.as_str(), "b.md");
         finder.move_by(5);
-        assert_eq!(finder.selected, 0);
+        assert_eq!(finder.selected(), 0);
     }
 }

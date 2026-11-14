@@ -411,16 +411,9 @@ fn a_walk_past_its_limits_says_it_is_partial() {
         ..NO_LIMIT
     };
     assert_eq!(walked(&*snapshot, few), (files, Walked::Partial));
-    let mut every = 0;
-    let mut dirs = vec![SnapshotPath::root()];
-    while let Some(dir) = dirs.pop() {
-        for entry in snapshot.list(&dir).unwrap() {
-            every += 1;
-            if entry.kind == EntryKind::Directory {
-                dirs.push(entry.path);
-            }
-        }
-    }
+    // The fixture's entries: 16 at the root, `.attachments/a.png`, `Z/z.md`,
+    // and `page.md` and `up-link.png` in `docs`.
+    let every = 20;
     let exact = WalkLimits {
         entries: every,
         ..NO_LIMIT

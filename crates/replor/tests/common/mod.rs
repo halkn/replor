@@ -79,6 +79,10 @@ pub fn key(code: KeyCode) -> KeyEvent {
     KeyEvent::new(code, KeyModifiers::NONE)
 }
 
+pub fn ctrl(c: char) -> KeyEvent {
+    KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+}
+
 pub fn ch(c: char) -> KeyEvent {
     key(KeyCode::Char(c))
 }

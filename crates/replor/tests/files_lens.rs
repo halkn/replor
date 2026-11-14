@@ -7,10 +7,9 @@ mod common;
 use std::path::Path;
 use std::sync::Arc;
 
-use common::{ch, focus_preview, key, new_app, options, path, rendered_text, screen, write};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use common::{ch, ctrl, focus_preview, key, new_app, options, path, rendered_text, screen, write};
+use crossterm::event::KeyCode;
 use replor::app::Outcome;
-use replor::finder::Progress;
 use replor::start;
 use replor_render::flavor::Flavor;
 
@@ -113,13 +112,8 @@ fn the_finder_opens_the_p1_core_design_by_a_few_letters() {
         140,
         40,
     );
-    app.key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-    while *app.candidates().progress() == Progress::Listing {
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        app.tick();
-    }
-    app.tick();
-    assert_eq!(*app.candidates().progress(), Progress::Complete);
+    app.key(ctrl('p'));
+    app.wait_for_files();
     for c in "p1co".chars() {
         app.key(ch(c));
     }
