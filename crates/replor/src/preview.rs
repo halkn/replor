@@ -45,7 +45,14 @@ pub struct Content {
     /// Lines the document has above the file's first line: the opening fence
     /// of a file shown as code.
     pub line_offset: usize,
+    /// `Ok` when the document was made from a Markdown file's text, which its
+    /// Source is then made from; otherwise why it has none. Anything else is
+    /// `Err`, so a document left out by mistake is refused rather than its
+    /// notice shown as the file's text.
+    pub markdown: Result<(), String>,
 }
+
+const NOT_MARKDOWN: &str = "not Markdown";
 
 /// The opening fence a file shown as code has above its first line.
 const FENCE_LINES: usize = 1;
@@ -57,13 +64,20 @@ pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options
         title: title(path),
         kind: kind.to_string(),
         line_offset,
+        markdown: Err(NOT_MARKDOWN.to_string()),
     };
     if is_markdown(path) {
-        content(
-            markdown(snapshot, path, options),
-            &flavor_name(options.flavor),
-            0,
-        )
+        let kind = flavor_name(options.flavor);
+        match markdown(snapshot, path, options) {
+            Ok(document) => Content {
+                markdown: Ok(()),
+                ..content(document, &kind, 0)
+            },
+            Err(reason) => Content {
+                markdown: Err(reason.clone()),
+                ..content(plain(&cannot_show(&reason), options), &kind, 0)
+            },
+        }
     } else if IMAGES.contains(&extension.as_str()) {
         content(picture(snapshot, path, options), "image", 0)
     } else {
@@ -80,20 +94,32 @@ pub fn is_markdown(path: &SnapshotPath) -> bool {
     MARKDOWN.contains(&extension(path).as_str())
 }
 
-/// A Markdown file as its text, through the same path and limits as any text
-/// file: the Markdown limit is far larger, and highlighting that much would
-/// freeze the UI. Fails with the reason when it cannot be shown.
+/// A Markdown file as its text, made from the text `rendering` was made from
+/// rather than read again, so the two show the same version of the file. It
+/// has the same limits as any text file: the Markdown limit is far larger,
+/// and highlighting that much would freeze the UI. Fails with the reason when
+/// it cannot be shown.
 pub fn source(
-    snapshot: &Arc<dyn Snapshot>,
+    rendering: &Content,
     path: &SnapshotPath,
     options: &Options,
 ) -> Result<Content, String> {
-    let document = text(snapshot, path, &extension(path), options)?;
+    rendering.markdown.clone()?;
+    let body = rendering.document.document().source.as_str();
+    if body.len() as u64 > MAX_TEXT_BYTES {
+        return Err(larger_than(MAX_TEXT_BYTES));
+    }
+    if is_binary(body.as_bytes()) {
+        return Err(BINARY.to_string());
+    }
+    let document = code(body, &extension(path), options)?;
     Ok(Content {
         document,
         title: title(path),
         kind: "source".to_string(),
         line_offset: FENCE_LINES,
+        // The source's own text is the fenced file, not Markdown to show.
+        markdown: Err(NOT_MARKDOWN.to_string()),
     })
 }
 
@@ -104,6 +130,7 @@ pub fn notice(message: &str, options: &Options) -> Content {
         title: String::new(),
         kind: String::new(),
         line_offset: 0,
+        markdown: Err(NOT_MARKDOWN.to_string()),
     }
 }
 
@@ -122,26 +149,23 @@ fn markdown(
     snapshot: &Arc<dyn Snapshot>,
     path: &SnapshotPath,
     options: &Options,
-) -> PreparedDocument {
-    match document::load(Arc::clone(snapshot), path.clone()) {
-        Ok(loaded) => {
-            let built = document::build(
-                loaded.text,
-                options.flavor,
-                options.mermaid,
-                options.mermaid_width,
-            );
-            PreparedDocument::new(
-                built,
-                InlineContext {
-                    base_dir: Some(loaded.base_dir),
-                    source: Some(loaded.source),
-                    ..inline(options)
-                },
-            )
-        }
-        Err(err) => plain(&cannot_show(&err.to_string()), options),
-    }
+) -> Result<PreparedDocument, String> {
+    let loaded =
+        document::load(Arc::clone(snapshot), path.clone()).map_err(|err| err.to_string())?;
+    let built = document::build(
+        loaded.text,
+        options.flavor,
+        options.mermaid,
+        options.mermaid_width,
+    );
+    Ok(PreparedDocument::new(
+        built,
+        InlineContext {
+            base_dir: Some(loaded.base_dir),
+            source: Some(loaded.source),
+            ..inline(options)
+        },
+    ))
 }
 
 /// A one-image document read from the snapshot, so the picture goes through
@@ -177,22 +201,37 @@ fn text(
 ) -> Result<PreparedDocument, String> {
     let bytes = match snapshot.read(path, MAX_TEXT_BYTES) {
         Ok(bytes) => bytes,
-        Err(SnapshotError::TooLarge { limit }) => {
-            return Err(format!("larger than {limit} bytes"));
-        }
+        Err(SnapshotError::TooLarge { limit }) => return Err(larger_than(limit)),
         Err(err) => return Err(err.to_string()),
     };
-    // Git's test for a binary file: a NUL in the first 8000 bytes.
-    if bytes.iter().take(8000).any(|&b| b == 0) {
-        return Err("binary file".to_string());
+    // Before decoding, so a binary file is called that rather than not UTF-8.
+    if is_binary(&bytes) {
+        return Err(BINARY.to_string());
     }
     let Ok(body) = document::decode(bytes, path.as_str()) else {
         return Err("not UTF-8 text".to_string());
     };
+    code(&body, extension, options)
+}
+
+const BINARY: &str = "binary file";
+
+/// Git's test for a binary file: a NUL in the first 8000 bytes.
+fn is_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(8000).any(|&b| b == 0)
+}
+
+fn larger_than(limit: u64) -> String {
+    format!("larger than {limit} bytes")
+}
+
+/// Text as a fenced code block in the language `extension` names, or why it
+/// is too long to show.
+fn code(body: &str, extension: &str, options: &Options) -> Result<PreparedDocument, String> {
     if body.lines().count() > MAX_TEXT_LINES {
         return Err(format!("more than {MAX_TEXT_LINES} lines"));
     }
-    let longest = longest_run(&body, '`');
+    let longest = longest_run(body, '`');
     let fence = "`".repeat(longest.max(2) + 1);
     let newline = if body.ends_with('\n') || body.is_empty() {
         ""
@@ -348,6 +387,33 @@ mod tests {
         let big = vec![b'x'; MAX_TEXT_BYTES as usize + 1];
         write(dir.path(), "big.txt", &big);
         assert!(shown(dir.path(), "big.txt").0.contains("larger than"));
+    }
+
+    /// The rendering's text goes through the same limits as a text file read.
+    #[test]
+    fn the_source_of_large_or_binary_markdown_is_not_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshot: Arc<dyn Snapshot> = Arc::new(WorktreeSnapshot::open(dir.path()).unwrap());
+        let source_of = |name: &str| {
+            let path = SnapshotPath::new(name).unwrap();
+            let rendering = open(&snapshot, &path, &OPTIONS);
+            source(&rendering, &path, &OPTIONS).map(|_| ())
+        };
+        write(
+            dir.path(),
+            "big.md",
+            &vec![b'x'; MAX_TEXT_BYTES as usize + 1],
+        );
+        let big = source_of("big.md");
+        assert!(
+            big.as_ref()
+                .is_err_and(|reason| reason.contains("larger than")),
+            "{big:?}"
+        );
+        write(dir.path(), "nul.md", b"# A\n\n\x00\n");
+        assert_eq!(source_of("nul.md"), Err(BINARY.to_string()));
+        write(dir.path(), "ok.md", b"# A\n");
+        assert_eq!(source_of("ok.md"), Ok(()));
     }
 
     #[test]
