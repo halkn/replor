@@ -8,6 +8,7 @@ use ratatui::text::{Line as RatLine, Span as RatSpan};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::finder::{Candidates, Finder, Progress};
 use crate::pager::help;
 use crate::pager::state::{Mode, PagerState};
 use replor_render::layout::theme::{Color, Style, Theme};
@@ -207,6 +208,78 @@ fn draw_outline(frame: &mut Frame, state: &PagerState, ctx: &ViewContext<'_>, bo
     let block = Block::bordered()
         .title("Headings")
         .border_style(convert(ctx.theme.style(StyleRole::CodeBorder)));
+    frame.render_widget(Clear, area);
+    frame.render_widget(Paragraph::new(rows).block(block), area);
+}
+
+/// Matches the finder shows at once, when the screen is tall enough.
+const FINDER_ROWS: usize = 20;
+
+/// The finder, over both panes, in the frame of the heading list.
+pub fn draw_finder(frame: &mut Frame, finder: &Finder, candidates: &Candidates, theme: Theme) {
+    let screen = frame.area();
+    let body = Rect {
+        height: screen.height.saturating_sub(1),
+        ..screen
+    };
+    // A fixed size, so the box does not jump as the matches change.
+    let area = overlay_area(body, 1 + FINDER_ROWS);
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let inner_height = area.height.saturating_sub(2) as usize;
+    let style = |role| convert(theme.style(role));
+    let query = replor_render::text::visible(finder.query());
+    let prompt = elide_start(&format!("> {query}"), inner_width.saturating_sub(1));
+    let mut rows = vec![RatLine::from(vec![
+        RatSpan::styled(prompt, style(StyleRole::Normal)),
+        // The caret: the terminal cursor stays hidden.
+        RatSpan::styled(
+            " ",
+            style(StyleRole::Normal).add_modifier(Modifier::REVERSED),
+        ),
+    ])];
+    let entries = candidates.entries();
+    let matches = finder.matches();
+    let window = outline_window(
+        finder.selected(),
+        matches.len(),
+        inner_height.saturating_sub(1),
+    );
+    rows.extend(window.map(|index| {
+        let path = entries[matches[index]].entry.path.as_str();
+        // A path is the snapshot's, and may hold terminal controls. The
+        // start is cut, so the file name stays.
+        let label = elide_start(&replor_render::text::visible(path), inner_width);
+        let role = match index == finder.selected() {
+            true => StyleRole::SearchMatch,
+            false => StyleRole::Normal,
+        };
+        RatLine::from(RatSpan::styled(label, style(role)))
+    }));
+    if matches.is_empty() && inner_height > 1 {
+        // The file may yet come in a later batch.
+        let empty = match candidates.progress() {
+            Progress::Listing => "listing…",
+            Progress::Complete | Progress::Partial | Progress::Failed(_) => "no match",
+        };
+        rows.push(RatLine::from(RatSpan::styled(
+            empty,
+            style(StyleRole::Muted),
+        )));
+    }
+    let progress = match candidates.progress() {
+        Progress::Listing => " · listing…".into(),
+        Progress::Complete => String::new(),
+        Progress::Partial => " · partial: limit reached".into(),
+        // The reason can quote a path, which may hold terminal controls.
+        Progress::Failed(reason) => format!(
+            " · cannot list the files: {}",
+            replor_render::text::visible(reason)
+        ),
+    };
+    let title = format!("Files {}/{}{progress}", matches.len(), entries.len());
+    let block = Block::bordered()
+        .title(title)
+        .border_style(style(StyleRole::CodeBorder));
     frame.render_widget(Clear, area);
     frame.render_widget(Paragraph::new(rows).block(block), area);
 }

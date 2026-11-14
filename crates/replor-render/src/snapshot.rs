@@ -215,6 +215,71 @@ pub trait Snapshot: Send + Sync {
     fn label(&self) -> String;
 }
 
+/// How far `walk` goes, so a huge or deeply nested tree still ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WalkLimits {
+    /// Entries seen, directories included, so a tree of nothing but
+    /// directories is bounded too.
+    pub entries: usize,
+    /// Components of the deepest directory listed.
+    pub depth: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Walked {
+    Complete,
+    /// A limit cut the walk short, so some entries were never seen.
+    Partial,
+    /// The visitor asked to stop.
+    Stopped,
+}
+
+/// Hands every entry that is not a directory to `visit`, shallowest first,
+/// until it returns `false`. Built on `list` alone, so a working tree and a
+/// revision give the same entries, with the same ignore rules as the tree. A
+/// symlink is handed over and never followed, so the walk cannot loop or
+/// leave the root. A directory below the root that cannot be listed is
+/// passed over, as the tree shows it empty; the root failing is the error,
+/// since then there is nothing at all.
+pub fn walk(
+    snapshot: &dyn Snapshot,
+    limits: WalkLimits,
+    mut visit: impl FnMut(Entry) -> bool,
+) -> Result<Walked, SnapshotError> {
+    let mut queue = std::collections::VecDeque::from([(SnapshotPath::root(), 0usize)]);
+    let mut seen = 0;
+    let mut partial = false;
+    while let Some((dir, depth)) = queue.pop_front() {
+        let entries = match snapshot.list(&dir) {
+            Ok(entries) => entries,
+            Err(err) if dir.is_root() => return Err(err),
+            Err(_) => continue,
+        };
+        for entry in entries {
+            if seen == limits.entries {
+                return Ok(Walked::Partial);
+            }
+            seen += 1;
+            if entry.kind == EntryKind::Directory {
+                if depth < limits.depth {
+                    queue.push_back((entry.path, depth + 1));
+                } else if !partial {
+                    // Only a directory with something in it hides entries.
+                    partial = snapshot.list(&entry.path).is_ok_and(|e| !e.is_empty());
+                }
+                continue;
+            }
+            if !visit(entry) {
+                return Ok(Walked::Stopped);
+            }
+        }
+    }
+    Ok(match partial {
+        true => Walked::Partial,
+        false => Walked::Complete,
+    })
+}
+
 /// A document together with the snapshot it was read from, which is where its
 /// images are read from too.
 #[derive(Clone)]

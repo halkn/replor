@@ -29,6 +29,11 @@ pub const ENTRIES: &[Entry] = &[
         pane: Pane::Both,
     },
     Entry {
+        keys: &["Ctrl-p"],
+        action: "Find a file by its path, Enter to open, Esc to cancel",
+        pane: Pane::Both,
+    },
+    Entry {
         keys: &["j", "Down"],
         action: "Tree: next entry",
         pane: Pane::Tree,

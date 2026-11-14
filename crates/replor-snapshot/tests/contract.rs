@@ -19,7 +19,9 @@ use replor_render::image;
 use replor_render::layout::icons::IconSet;
 use replor_render::layout::theme::Variant;
 use replor_render::output::ColorChoice;
-use replor_render::snapshot::{DocumentSource, EntryKind, Snapshot, SnapshotError, SnapshotPath};
+use replor_render::snapshot::{
+    DocumentSource, EntryKind, Snapshot, SnapshotError, SnapshotPath, WalkLimits, Walked, walk,
+};
 use replor_render::{RenderOptions, render_to_string};
 use replor_snapshot::{RevisionSnapshot, WorktreeSnapshot};
 
@@ -336,6 +338,127 @@ fn reading_changes_nothing_in_the_repository() {
         rendered(snapshot, "bom.md");
     }
     assert_eq!(fixture.git_state(), before);
+}
+
+fn walked(snapshot: &dyn Snapshot, limits: WalkLimits) -> (Vec<String>, Walked) {
+    let mut paths = Vec::new();
+    let walked = walk(snapshot, limits, |entry| {
+        paths.push(entry.path.to_string());
+        true
+    })
+    .unwrap();
+    (paths, walked)
+}
+
+const NO_LIMIT: WalkLimits = WalkLimits {
+    entries: usize::MAX,
+    depth: usize::MAX,
+};
+
+/// Symlinks to directories, inside, outside and looping, are handed over as
+/// entries and never followed, so the walk ends inside the root.
+#[test]
+fn both_walk_the_same_entries_and_follow_no_symlink() {
+    let fixture = Fixture::new();
+    let outside = fixture.repo.parent().unwrap();
+    write(&outside.join("away/far.md"), "far");
+    symlink(outside.join("away"), fixture.repo.join("away-link")).unwrap();
+    symlink(".", fixture.repo.join("self-link")).unwrap();
+    symlink("..", fixture.repo.join("docs/up")).unwrap();
+    git(&fixture.repo, &["add", "-A"]);
+    git(&fixture.repo, &["commit", "-q", "-m", "directory links"]);
+    let commit = git(&fixture.repo, &["rev-parse", "HEAD"]);
+    let commit = ObjectId::from_hex(commit.trim().as_bytes()).unwrap();
+    let revision = RevisionSnapshot::open(&fixture.repo, commit).unwrap();
+
+    let (paths, done) = walked(&*fixture.worktree(), NO_LIMIT);
+    assert_eq!(done, Walked::Complete);
+    assert_eq!(walked(&revision, NO_LIMIT), (paths.clone(), done));
+    for expected in ["away-link", "self-link", "docs/up", "loop-a.png", "Z/z.md"] {
+        assert!(
+            paths.contains(&expected.to_string()),
+            "{expected}: {paths:?}"
+        );
+    }
+    assert!(
+        !paths.iter().any(|path| path.contains("far.md")),
+        "{paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|path| path.contains("ignored")),
+        "{paths:?}"
+    );
+    // Shallowest first, so a partial walk still has the top of the tree.
+    let depth = |path: &String| path.matches('/').count();
+    assert!(paths.is_sorted_by_key(depth), "{paths:?}");
+}
+
+#[test]
+fn a_walk_past_its_limits_says_it_is_partial() {
+    let fixture = Fixture::new();
+    let snapshot = fixture.worktree();
+    let (all, _) = walked(&*snapshot, NO_LIMIT);
+    // Directories count, and the root lists its own first: with no more
+    // than its entries, only its files are handed over.
+    let top = snapshot.list(&SnapshotPath::root()).unwrap();
+    let files: Vec<String> = top
+        .iter()
+        .filter(|entry| entry.kind != EntryKind::Directory)
+        .map(|entry| entry.path.to_string())
+        .collect();
+    let few = WalkLimits {
+        entries: top.len(),
+        ..NO_LIMIT
+    };
+    assert_eq!(walked(&*snapshot, few), (files, Walked::Partial));
+    // The fixture's entries: 16 at the root, `.attachments/a.png`, `Z/z.md`,
+    // and `page.md` and `up-link.png` in `docs`.
+    let every = 20;
+    let exact = WalkLimits {
+        entries: every,
+        ..NO_LIMIT
+    };
+    assert_eq!(walked(&*snapshot, exact), (all.clone(), Walked::Complete));
+    let short = WalkLimits {
+        entries: every - 1,
+        ..NO_LIMIT
+    };
+    assert_eq!(walked(&*snapshot, short).1, Walked::Partial);
+    // An empty directory past the depth hides nothing.
+    std::fs::create_dir(fixture.repo.join("Z/empty")).unwrap();
+    let level = WalkLimits {
+        depth: 1,
+        ..NO_LIMIT
+    };
+    assert_eq!(walked(&*snapshot, level), (all.clone(), Walked::Complete));
+    let shallow = WalkLimits {
+        depth: 0,
+        ..NO_LIMIT
+    };
+    let (top, done) = walked(&*snapshot, shallow);
+    assert_eq!(done, Walked::Partial);
+    assert!(top.iter().all(|path| !path.contains('/')), "{top:?}");
+    assert!(top.contains(&"README.md".to_string()), "{top:?}");
+}
+
+#[test]
+fn a_walk_stops_when_asked() {
+    let fixture = Fixture::new();
+    let mut seen = 0;
+    let done = walk(&*fixture.worktree(), NO_LIMIT, |_| {
+        seen += 1;
+        seen < 2
+    });
+    assert_eq!((done.unwrap(), seen), (Walked::Stopped, 2));
+}
+
+/// Nothing at all can be listed, which is not the same as an empty tree.
+#[test]
+fn a_walk_fails_when_the_root_cannot_be_listed() {
+    let fixture = Fixture::new();
+    let snapshot = fixture.worktree();
+    std::fs::remove_dir_all(&fixture.repo).unwrap();
+    assert!(walk(&*snapshot, NO_LIMIT, |_| true).is_err());
 }
 
 /// A nested clone owns the documents below it: they may not reach the outer
