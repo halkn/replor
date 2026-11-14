@@ -21,6 +21,7 @@ use replor_render::layout::{LayoutOptions, RenderedDocument, StyleRole, layout_d
 use replor_render::markdown::model::{Document, headings};
 use replor_render::navigation::{Anchor, Link, Target, anchors, links};
 use replor_render::snapshot::{EntryKind, Snapshot, SnapshotPath, WalkLimits};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::finder::{self, Candidates, Finder, Progress};
 use crate::navigate::{self, Destination, History, Place};
@@ -369,7 +370,9 @@ impl App {
             KeyCode::Char('p') if control => finder.move_by(-1),
             KeyCode::Char('n') if control => finder.move_by(1),
             KeyCode::Backspace => {
-                if finder.query.pop().is_some() {
+                // A grapheme, so a combining mark goes with its letter.
+                if let Some((at, _)) = finder.query.grapheme_indices(true).next_back() {
+                    finder.query.truncate(at);
                     self.refresh_finder(true);
                 }
             }
@@ -824,10 +827,12 @@ impl App {
             Line::from(Span::styled(label, style(role)))
         }));
         if finder.matches.is_empty() && inner_height > 1 {
-            rows.push(Line::from(Span::styled(
-                "no match",
-                style(StyleRole::Muted),
-            )));
+            // The file may yet come in a later batch.
+            let empty = match self.candidates.progress() {
+                Progress::Listing => "listing…",
+                Progress::Complete | Progress::Partial => "no match",
+            };
+            rows.push(Line::from(Span::styled(empty, style(StyleRole::Muted))));
         }
         let progress = match self.candidates.progress() {
             Progress::Listing => " · listing…",
@@ -1285,6 +1290,9 @@ mod tests {
         listed(&mut app);
         // Keys that quit or reload elsewhere are text here.
         type_text(&mut app, "qr");
+        assert_eq!(app.finder().unwrap().query, "qr");
+        type_text(&mut app, "e\u{301}");
+        app.key(parse("Backspace"));
         assert_eq!(app.finder().unwrap().query, "qr");
         app.key(parse("Backspace"));
         app.key(parse("Backspace"));

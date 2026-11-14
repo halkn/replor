@@ -7,7 +7,7 @@ mod common;
 use std::path::Path;
 use std::sync::Arc;
 
-use common::{ch, focus_preview, key, new_app, options, path, rendered_text, screen};
+use common::{ch, focus_preview, key, new_app, options, path, rendered_text, screen, write};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use replor::app::Outcome;
 use replor::finder::Progress;
@@ -88,10 +88,24 @@ fn the_p0_results_link_reaches_its_japanese_heading_and_back() {
 }
 
 /// `Ctrl-p` and a few letters of the name reach a file outside `docs/` as
-/// well as inside it.
+/// well as inside it. The layout is replor's own, in a temporary directory,
+/// so untracked files of the checkout cannot change the matches.
 #[test]
 fn the_finder_opens_the_p1_core_design_by_a_few_letters() {
-    let start = start::resolve(None, repository()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    for file in [
+        "docs/design/p1-core.md",
+        "docs/design/concept.md",
+        "docs/spike/p0-results.md",
+        "crates/replor/src/pager/mod.rs",
+        "crates/replor-snapshot/src/lib.rs",
+        "README.md",
+    ] {
+        write(&dir.path().join(file), "# Page\n");
+    }
+    let start = start::resolve(None, dir.path()).unwrap();
+    assert_eq!(start.top.as_str(), "docs");
     let mut app = new_app(
         Arc::new(start.snapshot),
         start.top,

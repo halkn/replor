@@ -410,6 +410,13 @@ fn a_walk_past_its_limits_says_it_is_partial() {
         ..NO_LIMIT
     };
     assert_eq!(walked(&*snapshot, exact), (all.clone(), Walked::Complete));
+    // An empty directory past the depth hides nothing.
+    std::fs::create_dir(fixture.repo.join("Z/empty")).unwrap();
+    let level = WalkLimits {
+        depth: 1,
+        ..NO_LIMIT
+    };
+    assert_eq!(walked(&*snapshot, level), (all.clone(), Walked::Complete));
     let shallow = WalkLimits {
         depth: 0,
         ..NO_LIMIT

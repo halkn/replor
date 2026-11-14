@@ -253,9 +253,11 @@ pub fn walk(
         };
         for entry in entries {
             if entry.kind == EntryKind::Directory {
-                match depth < limits.depth {
-                    true => queue.push_back((entry.path, depth + 1)),
-                    false => partial = true,
+                if depth < limits.depth {
+                    queue.push_back((entry.path, depth + 1));
+                } else if !partial {
+                    // Only a directory with something in it hides entries.
+                    partial = snapshot.list(&entry.path).is_ok_and(|e| !e.is_empty());
                 }
                 continue;
             }
