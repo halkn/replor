@@ -252,3 +252,70 @@ fn the_source_of_a_long_markdown_file_is_not_shown() {
     assert_eq!(app.top_line(), line);
     assert!(refusal(&app).contains("more than"), "{}", refusal(&app));
 }
+
+/// The status bar's `line/lines`: the only word with a `/` between numbers.
+fn position(status: &str) -> String {
+    status
+        .split_whitespace()
+        .find(|word| {
+            word.split_once('/')
+                .is_some_and(|(a, b)| a.parse::<usize>().is_ok() && b.parse::<usize>().is_ok())
+        })
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// A text file counts its own lines, not the fences around it.
+#[test]
+fn the_status_bar_of_a_text_file_counts_the_file_lines() {
+    let dir = fixture();
+    let body: String = (1..=121).map(|i| format!("line {i}\n")).collect();
+    write(&dir.path().join("long.txt"), &body);
+    let mut app = app(dir.path());
+    app.open(&path("long.txt"));
+    assert_eq!(position(&status_bar(&mut app)), "1/121");
+    for _ in 0..20 {
+        app.key(ch('j'));
+    }
+    let line = app.top_line().expect("a source line at the top");
+    let top = top_text(&app);
+    assert!(
+        top.trim_end().ends_with(&format!(" line {line}")),
+        "line {line}: {top}"
+    );
+    let status = status_bar(&mut app);
+    assert_eq!(position(&status), format!("{line}/121"), "{status}");
+}
+
+/// With room for one row, the bottom of a text file is its closing fence,
+/// which is no line of the file: the status bar stops at the last one.
+#[test]
+fn the_closing_fence_counts_as_the_last_line() {
+    let dir = fixture();
+    let body: String = (1..=121).map(|i| format!("line {i}\n")).collect();
+    write(&dir.path().join("long.txt"), &body);
+    let height = 2;
+    let mut app = common::app(dir.path(), "", Flavor::Gfm, WIDTH, height);
+    app.open(&path("long.txt"));
+    app.key(ch('G'));
+    assert_eq!(app.top_line(), Some(121), "{}", top_text(&app));
+    let status = common::row(&common::draw(&mut app, WIDTH, height), height - 1);
+    assert_eq!(position(&status), "121/121", "{status}");
+}
+
+#[test]
+fn preview_and_source_show_the_same_line_and_lines() {
+    let dir = fixture();
+    let mut app = app(dir.path());
+    app.open(&path("a.md"));
+    for _ in 0..15 {
+        app.key(ch('j'));
+    }
+    let line = app.top_line().expect("a source line at the top");
+    let preview = status_bar(&mut app);
+    // `a.md` has 123 lines.
+    assert_eq!(position(&preview), format!("{line}/123"), "{preview}");
+    app.key(ch('s'));
+    let source = status_bar(&mut app);
+    assert_eq!(position(&source), position(&preview), "{source}");
+}

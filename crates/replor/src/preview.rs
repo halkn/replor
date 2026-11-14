@@ -45,6 +45,9 @@ pub struct Content {
     /// Lines the document has above the file's first line: the opening fence
     /// of a file shown as code.
     pub line_offset: usize,
+    /// The file's lines, which the status bar counts: for a file shown as
+    /// code, without the fences around it.
+    pub lines: usize,
     /// `Ok` when the document was made from a Markdown file's text, which its
     /// Source is then made from; otherwise why it has none. Anything else is
     /// `Err`, so a document left out by mistake is refused rather than its
@@ -59,7 +62,8 @@ const FENCE_LINES: usize = 1;
 
 pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options) -> Content {
     let extension = extension(path);
-    let content = |document, kind: &str, line_offset| Content {
+    let content = |document: PreparedDocument, kind: &str, line_offset| Content {
+        lines: document.document().source.line_count(),
         document,
         title: title(path),
         kind: kind.to_string(),
@@ -82,7 +86,10 @@ pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options
         content(picture(snapshot, path, options), "image", 0)
     } else {
         match text(snapshot, path, &extension, options) {
-            Ok(document) => content(document, "text", FENCE_LINES),
+            Ok(Code { document, lines }) => Content {
+                lines,
+                ..content(document, "text", FENCE_LINES)
+            },
             Err(reason) => content(plain(&cannot_show(&reason), options), "text", 0),
         }
     }
@@ -112,12 +119,13 @@ pub fn source(
     if is_binary(body.as_bytes()) {
         return Err(BINARY.to_string());
     }
-    let document = code(body, &extension(path), options)?;
+    let Code { document, lines } = code(body, &extension(path), options)?;
     Ok(Content {
         document,
         title: title(path),
         kind: "source".to_string(),
         line_offset: FENCE_LINES,
+        lines,
         // The source's own text is the fenced file, not Markdown to show.
         markdown: Err(NOT_MARKDOWN.to_string()),
     })
@@ -125,8 +133,10 @@ pub fn source(
 
 /// The pane before any file is chosen, or with a message of its own.
 pub fn notice(message: &str, options: &Options) -> Content {
+    let document = plain(&format!("{}\n", escape(message)), options);
     Content {
-        document: plain(&format!("{}\n", escape(message)), options),
+        lines: document.document().source.line_count(),
+        document,
         title: String::new(),
         kind: String::new(),
         line_offset: 0,
@@ -198,7 +208,7 @@ fn text(
     path: &SnapshotPath,
     extension: &str,
     options: &Options,
-) -> Result<PreparedDocument, String> {
+) -> Result<Code, String> {
     let bytes = match snapshot.read(path, MAX_TEXT_BYTES) {
         Ok(bytes) => bytes,
         Err(SnapshotError::TooLarge { limit }) => return Err(larger_than(limit)),
@@ -225,10 +235,17 @@ fn larger_than(limit: u64) -> String {
     format!("larger than {limit} bytes")
 }
 
+/// A file's text as a fenced code block, and the file's own lines.
+struct Code {
+    document: PreparedDocument,
+    lines: usize,
+}
+
 /// Text as a fenced code block in the language `extension` names, or why it
 /// is too long to show.
-fn code(body: &str, extension: &str, options: &Options) -> Result<PreparedDocument, String> {
-    if body.lines().count() > MAX_TEXT_LINES {
+fn code(body: &str, extension: &str, options: &Options) -> Result<Code, String> {
+    let lines = body.lines().count();
+    if lines > MAX_TEXT_LINES {
         return Err(format!("more than {MAX_TEXT_LINES} lines"));
     }
     let longest = longest_run(body, '`');
@@ -242,7 +259,12 @@ fn code(body: &str, extension: &str, options: &Options) -> Result<PreparedDocume
     // looks up a syntax.
     let text = format!("{fence}{extension}\n{body}{newline}{fence}\n");
     let built = document::build(text, Flavor::Gfm, MermaidMode::Off, options.mermaid_width);
-    Ok(PreparedDocument::new(built, inline(options)))
+    Ok(Code {
+        document: PreparedDocument::new(built, inline(options)),
+        // Counted as a Markdown file's are (`SourceText::line_count`), so
+        // Preview and Source agree: an empty file has one line.
+        lines: lines.max(1),
+    })
 }
 
 fn plain(text: &str, options: &Options) -> PreparedDocument {

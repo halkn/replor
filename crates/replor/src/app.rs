@@ -228,10 +228,13 @@ impl App {
         self.link_bar.as_ref()
     }
 
-    /// The line of the open file at the top of the preview.
+    /// The line of the open file at the top of the preview. The fences around
+    /// a file shown as code are no lines of it, and count as the nearest one.
     pub fn top_line(&self) -> Option<usize> {
-        source_line_at(&self.rendered.lines, self.state.viewport.top)
-            .map(|line| line.saturating_sub(self.content.line_offset).max(1))
+        source_line_at(&self.rendered.lines, self.state.viewport.top).map(|line| {
+            line.saturating_sub(self.content.line_offset)
+                .clamp(1, self.content.lines.max(1))
+        })
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Outcome {
@@ -621,7 +624,8 @@ impl App {
         let ctx = ViewContext {
             title: &self.content.title,
             flavor: &self.content.kind,
-            source_lines: self.content.document.document().source.line_count(),
+            top_line: self.top_line().unwrap_or(0),
+            lines: self.content.lines,
             diagnostics: self.rendered.diagnostics.len(),
             theme: self.theme,
             selected_link: self.selected_link.map(|index| self.links[index].key),
