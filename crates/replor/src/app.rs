@@ -29,7 +29,8 @@ use crate::pager::help;
 use crate::pager::images::{self, ImageSession, Placed};
 use crate::pager::search::SearchIndex;
 use crate::pager::state::{
-    Action, Mode, OutlineItem, PagerState, rendered_line_for_source, source_line_at,
+    Action, Mode, OutlineItem, PagerState, ViewportAnchor, rendered_line_for_position,
+    rendered_line_for_source, source_line_at, source_position_at,
 };
 use crate::pager::view::{self, LinkBar, ViewContext, convert, elide_end, help_rows, widest_line};
 use crate::preview::{self, Content, Options};
@@ -138,6 +139,14 @@ pub struct App {
     /// again. Opening any file, by any means, goes back to the rendering,
     /// where its links can be followed.
     rendering: Option<Content>,
+    /// After a switch between rendering and source: the top it put this face
+    /// at, and where the other face was left. Switching back before scrolling
+    /// returns there exactly, which a place in the file cannot always say: a
+    /// block shown on fewer lines than it has cannot tell them all apart, a
+    /// heading shares its range with its `[[_TOC_]]` entry, and the end of a
+    /// document holds the top above where it was asked to be. Any other
+    /// layout forgets it.
+    switched: Option<(usize, ViewportAnchor)>,
     content: Content,
     rendered: RenderedDocument,
     texts: SearchIndex,
@@ -175,6 +184,7 @@ impl App {
             theme,
             opened: None,
             rendering: None,
+            switched: None,
             content,
             rendered: RenderedDocument::default(),
             texts: SearchIndex::default(),
@@ -447,9 +457,16 @@ impl App {
         let Some(path) = self.opened.clone().filter(preview::is_markdown) else {
             return self.refuse("only Markdown has a source view".to_string());
         };
-        // Rendered lines differ between the two, so the place is kept as a
-        // line of the file.
-        let line = self.top_line().unwrap_or(1);
+        let top = self.state.viewport.top;
+        let back = self
+            .switched
+            .filter(|&(at, _)| at == top)
+            .map(|(_, anchor)| anchor);
+        let leaving = self.state.anchor(&self.rendered.lines);
+        // Rendered lines differ between the two, so the place is kept in the
+        // file, finer than a line within a block.
+        let place = source_position_at(&self.rendered.lines, top)
+            .map_or(1.0, |position| position - self.content.line_offset as f64);
         match self.rendering.take() {
             Some(rendering) => self.content = rendering,
             None => match preview::source(&self.content, &path, &self.options) {
@@ -462,7 +479,27 @@ impl App {
         // other, as it does across `r` and a resize.
         let search = std::mem::take(&mut self.state.search);
         self.lay_out_fresh();
-        self.scroll_to_file_line(line);
+        let covered = match back {
+            // The face is laid out as it was left, so its place is exactly
+            // there, whatever the other face could tell apart.
+            Some(anchor) => {
+                self.state.restore_anchor(&self.rendered.lines, anchor);
+                true
+            }
+            None => {
+                let position = place + self.content.line_offset as f64;
+                match rendered_line_for_position(&self.rendered.lines, position) {
+                    Some((index, covered)) => {
+                        self.scroll_to_index(index);
+                        covered
+                    }
+                    None => false,
+                }
+            }
+        };
+        // A line no block covers moved to the next block, which is where the
+        // reader now is, there and on the way back.
+        self.switched = covered.then_some((self.state.viewport.top, leaving));
         self.state.carry_search(search, &self.texts);
         Outcome::Replaced
     }
@@ -488,9 +525,13 @@ impl App {
     /// Scrolls to a line of the document, as its IR numbers them.
     fn scroll_to_source(&mut self, line: usize) {
         if let Some(index) = rendered_line_for_source(&self.rendered.lines, line) {
-            self.state.viewport.top = index.min(self.state.max_top());
-            self.state.initial_line = Some(index);
+            self.scroll_to_index(index);
         }
+    }
+
+    fn scroll_to_index(&mut self, index: usize) {
+        self.state.viewport.top = index.min(self.state.max_top());
+        self.state.initial_line = Some(index);
     }
 
     /// Scrolls to a line of the open file.
@@ -589,6 +630,7 @@ impl App {
 
     /// A new surface in the preview, read from the top.
     fn lay_out_fresh(&mut self) {
+        self.switched = None;
         self.index();
         let (height, width) = self.body();
         self.rendered = layout_document(&self.content.document, LayoutOptions::new(width));
@@ -607,6 +649,7 @@ impl App {
 
     /// The same surface laid out again, keeping the reader's place.
     fn lay_out_again(&mut self) {
+        self.switched = None;
         let anchor = self.state.anchor(&self.rendered.lines);
         let (height, width) = self.body();
         self.rendered = layout_document(&self.content.document, LayoutOptions::new(width));

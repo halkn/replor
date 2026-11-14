@@ -572,6 +572,62 @@ fn run_starts(lines: &[RenderedLine], range: SourceRange) -> impl Iterator<Item 
     (0..lines.len()).filter(move |&i| same(i) && (i == 0 || !same(i - 1)))
 }
 
+/// Where the rendered line at `index` is in the source, finer than a line:
+/// within a block shown on several lines, the line's place in its run laid
+/// over the block's source lines. Both ways the middle of a share is taken,
+/// so where there are more rendered lines than source lines, going and
+/// coming back lands on the same line. A run not laid over its lines is at
+/// the middle of its first line (`proportional`).
+pub fn source_position_at(lines: &[RenderedLine], index: usize) -> Option<f64> {
+    let anchor = anchor_at(lines, index)?;
+    let range = anchor.range;
+    let start = range.line_start as f64;
+    if !proportional(lines, range, anchor.len) {
+        return Some(start + 0.5);
+    }
+    let count = (range.line_end - range.line_start + 1) as f64;
+    Some(start + (anchor.offset as f64 + 0.5) * count / anchor.len as f64)
+}
+
+/// The rendered line for a source position from `source_position_at`, and
+/// whether a block covers it. In the block `rendered_line_for_source` picks,
+/// the position is laid over its run of lines the same way back, so a place
+/// in the middle of a paragraph stays there. A line no block covers goes
+/// where `rendered_line_for_source` sends it.
+pub fn rendered_line_for_position(lines: &[RenderedLine], position: f64) -> Option<(usize, bool)> {
+    let line = position.max(1.0) as usize;
+    let first = rendered_line_for_source(lines, line)?;
+    let Some(range) = lines[first].source_range else {
+        return Some((first, false));
+    };
+    if !(range.line_start..=range.line_end).contains(&line) {
+        return Some((first, false));
+    }
+    let (start, len) = run(lines, first, range);
+    if !proportional(lines, range, len) {
+        return Some((start, true));
+    }
+    let count = (range.line_end - range.line_start + 1) as f64;
+    let offset = ((position - range.line_start as f64) * len as f64 / count) as usize;
+    Some((start + offset.min(len - 1), true))
+}
+
+/// Whether a run of `len` lines showing `range` is the block's own text laid
+/// over its lines. A container's lines (a `<details>` summary, a list item's
+/// separators) carry its whole range though its content is elsewhere, so a
+/// range with another inside it is kept at its start.
+fn proportional(lines: &[RenderedLine], range: SourceRange, len: usize) -> bool {
+    len > 1
+        && !lines
+            .iter()
+            .filter_map(|line| line.source_range)
+            .any(|other| {
+                other != range
+                    && range.line_start <= other.line_start
+                    && other.line_end <= range.line_end
+            })
+}
+
 /// Rendered line to open for a 1-based source line: the narrowest line covering
 /// it, else the nearest following mapped line, else the nearest preceding one.
 ///
@@ -753,6 +809,46 @@ mod tests {
 
     fn state() -> PagerState {
         PagerState::new(100, 200, 10, 40)
+    }
+
+    /// A container's title on lines 1 to 8, then a paragraph of lines 3 to 5
+    /// wrapped onto six lines.
+    #[test]
+    fn a_position_within_a_block_is_kept_in_proportion() {
+        let mut lines = vec![mapped(1, 8)];
+        lines.extend((0..6).map(|_| mapped(3, 5)));
+        assert_eq!(source_position_at(&lines, 0), Some(1.5));
+        assert_eq!(source_position_at(&lines, 4), Some(3.0 + 3.5 * 3.0 / 6.0));
+        assert_eq!(rendered_line_for_position(&lines, 4.5), Some((4, true)));
+        // Line 2 is the container's own.
+        assert_eq!(rendered_line_for_position(&lines, 2.5), Some((0, true)));
+    }
+
+    /// With more rendered lines than source lines, by however much, every
+    /// source line comes back to itself.
+    #[test]
+    fn a_line_of_a_block_comes_back_to_itself() {
+        for len in [3, 4, 5, 7] {
+            let lines: Vec<_> = (0..len).map(|_| mapped(3, 5)).collect();
+            for line in 3..=5 {
+                let (index, covered) =
+                    rendered_line_for_position(&lines, line as f64 + 0.5).unwrap();
+                assert!(covered);
+                let back = source_position_at(&lines, index).unwrap();
+                assert_eq!(back as usize, line, "{len}: {line} -> {index} -> {back}");
+            }
+        }
+    }
+
+    /// A `<details>` summary wrapped onto two lines carries the whole range,
+    /// and stays at its start rather than being laid over the content.
+    #[test]
+    fn a_container_wrapped_onto_several_lines_stays_at_its_start() {
+        let mut lines = vec![mapped(1, 20), mapped(1, 20)];
+        lines.extend((0..4).map(|_| mapped(3, 18)));
+        assert_eq!(source_position_at(&lines, 0), Some(1.5));
+        assert_eq!(source_position_at(&lines, 1), Some(1.5));
+        assert_eq!(rendered_line_for_position(&lines, 1.5), Some((0, true)));
     }
 
     fn mapped(line_start: usize, line_end: usize) -> RenderedLine {

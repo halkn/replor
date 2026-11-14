@@ -437,3 +437,137 @@ fn the_switch_leaves_the_status_of_the_other_face() {
     let status = status_bar(&mut app);
     assert!(!status.contains("wrapped"), "{status}");
 }
+
+/// `p.md` has a paragraph of 21 lines, `pNN …` on lines 9 to 29, long enough
+/// to wrap in the preview, between short ones and blank lines.
+fn paragraph() -> (tempfile::TempDir, App) {
+    let dir = fixture();
+    let long: String = (1..=21)
+        .map(|i| format!("p{i:02} alpha beta gamma delta epsilon zeta eta theta\n"))
+        .collect();
+    let after: String = (1..=40).map(|i| format!("\nFiller {i}.\n")).collect();
+    write(
+        &dir.path().join("p.md"),
+        &format!("# P\n\nOne.\n\nTwo.\n\nThree.\n\n{long}{after}"),
+    );
+    let mut app = app(dir.path());
+    app.open(&path("p.md"));
+    (dir, app)
+}
+
+/// Scrolls the source until `line` of the file is at the top.
+fn source_at(app: &mut App, line: usize) {
+    app.key(ch('s'));
+    for _ in 0..line + 1 {
+        if app.top_line() == Some(line) {
+            return;
+        }
+        app.key(ch('j'));
+    }
+    assert_eq!(app.top_line(), Some(line));
+}
+
+/// The middle of a paragraph stays the middle in the preview, and comes back
+/// to where it was.
+#[test]
+fn the_middle_of_a_paragraph_is_kept_across_the_switch_and_back() {
+    let (_dir, mut app) = paragraph();
+    source_at(&mut app, 19);
+    app.key(ch('s'));
+    let top = top_text(&app);
+    assert!(top.contains("alpha") && !top.contains("p01"), "{top}");
+    app.key(ch('s'));
+    assert_eq!(app.top_line(), Some(19));
+}
+
+#[test]
+fn the_middle_of_a_paragraph_in_the_preview_is_not_its_first_line() {
+    let (_dir, mut app) = paragraph();
+    for _ in 0..40 {
+        if top_text(&app).contains("p10") {
+            break;
+        }
+        app.key(ch('j'));
+    }
+    let top = top_text(&app);
+    assert!(top.contains("p10") && !top.contains("p01"), "{top}");
+    app.key(ch('s'));
+    let line = app.top_line().expect("a source line at the top");
+    assert!((10..=29).contains(&line), "{line}");
+}
+
+/// Short lines join into a paragraph of two rendered lines, too few to tell
+/// 21 lines apart: coming back before scrolling returns to the very line.
+#[test]
+fn a_line_of_a_short_paragraph_comes_back_as_it_was() {
+    let dir = fixture();
+    let short: String = (1..=21).map(|i| format!("q{i:02}\n")).collect();
+    let after: String = (1..=40).map(|i| format!("\nFiller {i}.\n")).collect();
+    write(
+        &dir.path().join("q.md"),
+        &format!("# Q\n\nOne.\n\nTwo.\n\nThree.\n\n{short}{after}"),
+    );
+    let mut app = app(dir.path());
+    app.open(&path("q.md"));
+    source_at(&mut app, 19);
+    app.key(ch('s'));
+    app.key(ch('s'));
+    assert_eq!(app.top_line(), Some(19));
+}
+
+/// A blank line between paragraphs is in no block: the switch goes to the
+/// next one, and coming back stays there.
+#[test]
+fn a_blank_line_goes_to_the_next_paragraph_and_stays() {
+    let (_dir, mut app) = paragraph();
+    source_at(&mut app, 8);
+    app.key(ch('s'));
+    app.key(ch('s'));
+    assert_eq!(app.top_line(), Some(9));
+}
+
+/// The source ends in 30 short lines the rendering joins into two, so the
+/// end of the source is further down than the rendering can scroll, which
+/// holds its top above where it was asked to be. Coming back is still to
+/// the end of the source.
+#[test]
+fn the_end_of_the_source_comes_back_to_itself() {
+    let dir = fixture();
+    let filler: String = (1..=20).map(|i| format!("Filler {i}.\n\n")).collect();
+    let short: String = (1..=30).map(|i| format!("e{i:02}\n")).collect();
+    write(&dir.path().join("e.md"), &format!("# E\n\n{filler}{short}"));
+    let mut app = app(dir.path());
+    app.open(&path("e.md"));
+    app.key(ch('s'));
+    app.key(ch('G'));
+    let line = app.top_line();
+    assert!(line.is_some_and(|line| line > 42), "{line:?}");
+    app.key(ch('s'));
+    app.key(ch('s'));
+    assert_eq!(app.top_line(), line);
+}
+
+/// A heading shares its range with its `[[_TOC_]]` entry: coming back is to
+/// the heading the reader was at, not to the entry.
+#[test]
+fn a_heading_listed_in_the_toc_comes_back_to_itself() {
+    let dir = fixture();
+    let filler: String = (1..=30).map(|i| format!("Filler {i}.\n\n")).collect();
+    write(
+        &dir.path().join("t.md"),
+        &format!("[[_TOC_]]\n\n# T\n\n{filler}## Foo\n\n{filler}"),
+    );
+    let mut app = common::app(dir.path(), "", Flavor::AzureDevops, WIDTH, HEIGHT);
+    app.open(&path("t.md"));
+    for _ in 0..80 {
+        if app.state().viewport.top > 5 && top_text(&app).contains("Foo") {
+            break;
+        }
+        app.key(ch('j'));
+    }
+    let top = app.state().viewport.top;
+    assert!(top > 5 && top_text(&app).contains("Foo"), "{top}");
+    app.key(ch('s'));
+    app.key(ch('s'));
+    assert_eq!(app.state().viewport.top, top, "{}", top_text(&app));
+}
