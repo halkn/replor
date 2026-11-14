@@ -345,7 +345,8 @@ fn walked(snapshot: &dyn Snapshot, limits: WalkLimits) -> (Vec<String>, Walked) 
     let walked = walk(snapshot, limits, |entry| {
         paths.push(entry.path.to_string());
         true
-    });
+    })
+    .unwrap();
     (paths, walked)
 }
 
@@ -397,19 +398,39 @@ fn a_walk_past_its_limits_says_it_is_partial() {
     let fixture = Fixture::new();
     let snapshot = fixture.worktree();
     let (all, _) = walked(&*snapshot, NO_LIMIT);
+    // Directories count, and the root lists its own first: with no more
+    // than its entries, only its files are handed over.
+    let top = snapshot.list(&SnapshotPath::root()).unwrap();
+    let files: Vec<String> = top
+        .iter()
+        .filter(|entry| entry.kind != EntryKind::Directory)
+        .map(|entry| entry.path.to_string())
+        .collect();
     let few = WalkLimits {
-        entries: 3,
+        entries: top.len(),
         ..NO_LIMIT
     };
-    assert_eq!(
-        walked(&*snapshot, few),
-        (all[..3].to_vec(), Walked::Partial)
-    );
+    assert_eq!(walked(&*snapshot, few), (files, Walked::Partial));
+    let mut every = 0;
+    let mut dirs = vec![SnapshotPath::root()];
+    while let Some(dir) = dirs.pop() {
+        for entry in snapshot.list(&dir).unwrap() {
+            every += 1;
+            if entry.kind == EntryKind::Directory {
+                dirs.push(entry.path);
+            }
+        }
+    }
     let exact = WalkLimits {
-        entries: all.len(),
+        entries: every,
         ..NO_LIMIT
     };
     assert_eq!(walked(&*snapshot, exact), (all.clone(), Walked::Complete));
+    let short = WalkLimits {
+        entries: every - 1,
+        ..NO_LIMIT
+    };
+    assert_eq!(walked(&*snapshot, short).1, Walked::Partial);
     // An empty directory past the depth hides nothing.
     std::fs::create_dir(fixture.repo.join("Z/empty")).unwrap();
     let level = WalkLimits {
@@ -435,7 +456,16 @@ fn a_walk_stops_when_asked() {
         seen += 1;
         seen < 2
     });
-    assert_eq!((done, seen), (Walked::Stopped, 2));
+    assert_eq!((done.unwrap(), seen), (Walked::Stopped, 2));
+}
+
+/// Nothing at all can be listed, which is not the same as an empty tree.
+#[test]
+fn a_walk_fails_when_the_root_cannot_be_listed() {
+    let fixture = Fixture::new();
+    let snapshot = fixture.worktree();
+    std::fs::remove_dir_all(&fixture.repo).unwrap();
+    assert!(walk(&*snapshot, NO_LIMIT, |_| true).is_err());
 }
 
 /// A nested clone owns the documents below it: they may not reach the outer

@@ -830,14 +830,19 @@ impl App {
             // The file may yet come in a later batch.
             let empty = match self.candidates.progress() {
                 Progress::Listing => "listing…",
-                Progress::Complete | Progress::Partial => "no match",
+                Progress::Complete | Progress::Partial | Progress::Failed(_) => "no match",
             };
             rows.push(Line::from(Span::styled(empty, style(StyleRole::Muted))));
         }
         let progress = match self.candidates.progress() {
-            Progress::Listing => " · listing…",
-            Progress::Complete => "",
-            Progress::Partial => " · partial: limit reached",
+            Progress::Listing => " · listing…".into(),
+            Progress::Complete => String::new(),
+            Progress::Partial => " · partial: limit reached".into(),
+            // The reason can quote a path, which may hold terminal controls.
+            Progress::Failed(reason) => format!(
+                " · cannot list the files: {}",
+                replor_render::text::visible(reason)
+            ),
         };
         let title = format!("Files {}/{}{progress}", finder.matches.len(), entries.len());
         let block = Block::bordered()
@@ -1328,8 +1333,24 @@ mod tests {
         app.key(ctrl('p'));
         listed(&mut app);
         let drawn = screen(&mut app);
+        // `docs` counts as one of the two.
         assert!(
-            drawn.contains("Files 2/2 · partial: limit reached"),
+            drawn.contains("Files 1/1 · partial: limit reached"),
+            "{drawn}"
+        );
+    }
+
+    #[test]
+    fn the_finder_says_why_nothing_could_be_listed() {
+        let dir = linked_fixture();
+        let mut app = app(dir.path(), "");
+        std::fs::remove_dir_all(dir.path()).unwrap();
+        app.list_files_within(finder::LIMITS);
+        app.key(ctrl('p'));
+        listed(&mut app);
+        let drawn = screen(&mut app);
+        assert!(
+            drawn.contains("Files 0/0 · cannot list the files:"),
             "{drawn}"
         );
     }

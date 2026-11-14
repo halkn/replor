@@ -18,17 +18,19 @@ pub const LIMITS: WalkLimits = WalkLimits {
 /// Entries sent at once, so the frame loop is not woken for every file.
 const BATCH: usize = 512;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Progress {
     Listing,
     Complete,
     /// A limit was reached, so some files are not candidates.
     Partial,
+    /// The root could not be listed, for this reason.
+    Failed(String),
 }
 
 enum Message {
     Entries(Vec<Entry>),
-    Done(Walked),
+    Done(Result<Walked, String>),
 }
 
 pub struct Candidate {
@@ -70,9 +72,9 @@ impl Candidates {
                     .send(Message::Entries(std::mem::take(&mut batch)))
                     .is_ok()
             });
-            if walked != Walked::Stopped {
+            if walked.as_ref().ok() != Some(&Walked::Stopped) {
                 let _ = sender.send(Message::Entries(batch));
-                let _ = sender.send(Message::Done(walked));
+                let _ = sender.send(Message::Done(walked.map_err(|err| err.to_string())));
             }
         });
         Self {
@@ -86,8 +88,8 @@ impl Candidates {
         &self.entries
     }
 
-    pub fn progress(&self) -> Progress {
-        self.progress
+    pub fn progress(&self) -> &Progress {
+        &self.progress
     }
 
     /// Takes what the listing has sent so far, without waiting. Returns
@@ -124,8 +126,9 @@ impl Candidates {
             }
             Message::Done(walked) => {
                 self.progress = match walked {
-                    Walked::Complete => Progress::Complete,
-                    Walked::Partial | Walked::Stopped => Progress::Partial,
+                    Ok(Walked::Complete) => Progress::Complete,
+                    Ok(Walked::Partial | Walked::Stopped) => Progress::Partial,
+                    Err(reason) => Progress::Failed(reason),
                 };
                 self.receiver = None;
             }

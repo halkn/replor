@@ -114,12 +114,12 @@ fn the_finder_opens_the_p1_core_design_by_a_few_letters() {
         40,
     );
     app.key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
-    while app.candidates().progress() == Progress::Listing {
+    while *app.candidates().progress() == Progress::Listing {
         std::thread::sleep(std::time::Duration::from_millis(10));
         app.tick();
     }
     app.tick();
-    assert_eq!(app.candidates().progress(), Progress::Complete);
+    assert_eq!(*app.candidates().progress(), Progress::Complete);
     for c in "p1co".chars() {
         app.key(ch(c));
     }

@@ -218,7 +218,8 @@ pub trait Snapshot: Send + Sync {
 /// How far `walk` goes, so a huge or deeply nested tree still ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WalkLimits {
-    /// Entries handed to the visitor.
+    /// Entries seen, directories included, so a tree of nothing but
+    /// directories is bounded too.
     pub entries: usize,
     /// Components of the deepest directory listed.
     pub depth: usize,
@@ -237,21 +238,28 @@ pub enum Walked {
 /// until it returns `false`. Built on `list` alone, so a working tree and a
 /// revision give the same entries, with the same ignore rules as the tree. A
 /// symlink is handed over and never followed, so the walk cannot loop or
-/// leave the root. A directory that cannot be listed is passed over, as the
-/// tree shows it empty.
+/// leave the root. A directory below the root that cannot be listed is
+/// passed over, as the tree shows it empty; the root failing is the error,
+/// since then there is nothing at all.
 pub fn walk(
     snapshot: &dyn Snapshot,
     limits: WalkLimits,
     mut visit: impl FnMut(Entry) -> bool,
-) -> Walked {
+) -> Result<Walked, SnapshotError> {
     let mut queue = std::collections::VecDeque::from([(SnapshotPath::root(), 0usize)]);
-    let mut handed = 0;
+    let mut seen = 0;
     let mut partial = false;
     while let Some((dir, depth)) = queue.pop_front() {
-        let Ok(entries) = snapshot.list(&dir) else {
-            continue;
+        let entries = match snapshot.list(&dir) {
+            Ok(entries) => entries,
+            Err(err) if dir.is_root() => return Err(err),
+            Err(_) => continue,
         };
         for entry in entries {
+            if seen == limits.entries {
+                return Ok(Walked::Partial);
+            }
+            seen += 1;
             if entry.kind == EntryKind::Directory {
                 if depth < limits.depth {
                     queue.push_back((entry.path, depth + 1));
@@ -261,19 +269,15 @@ pub fn walk(
                 }
                 continue;
             }
-            if handed == limits.entries {
-                return Walked::Partial;
-            }
-            handed += 1;
             if !visit(entry) {
-                return Walked::Stopped;
+                return Ok(Walked::Stopped);
             }
         }
     }
-    match partial {
+    Ok(match partial {
         true => Walked::Partial,
         false => Walked::Complete,
-    }
+    })
 }
 
 /// A document together with the snapshot it was read from, which is where its
