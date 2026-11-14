@@ -215,6 +215,65 @@ pub trait Snapshot: Send + Sync {
     fn label(&self) -> String;
 }
 
+/// How far `walk` goes, so a huge or deeply nested tree still ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WalkLimits {
+    /// Entries handed to the visitor.
+    pub entries: usize,
+    /// Components of the deepest directory listed.
+    pub depth: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Walked {
+    Complete,
+    /// A limit cut the walk short, so some entries were never seen.
+    Partial,
+    /// The visitor asked to stop.
+    Stopped,
+}
+
+/// Hands every entry that is not a directory to `visit`, shallowest first,
+/// until it returns `false`. Built on `list` alone, so a working tree and a
+/// revision give the same entries, with the same ignore rules as the tree. A
+/// symlink is handed over and never followed, so the walk cannot loop or
+/// leave the root. A directory that cannot be listed is passed over, as the
+/// tree shows it empty.
+pub fn walk(
+    snapshot: &dyn Snapshot,
+    limits: WalkLimits,
+    mut visit: impl FnMut(Entry) -> bool,
+) -> Walked {
+    let mut queue = std::collections::VecDeque::from([(SnapshotPath::root(), 0usize)]);
+    let mut handed = 0;
+    let mut partial = false;
+    while let Some((dir, depth)) = queue.pop_front() {
+        let Ok(entries) = snapshot.list(&dir) else {
+            continue;
+        };
+        for entry in entries {
+            if entry.kind == EntryKind::Directory {
+                match depth < limits.depth {
+                    true => queue.push_back((entry.path, depth + 1)),
+                    false => partial = true,
+                }
+                continue;
+            }
+            if handed == limits.entries {
+                return Walked::Partial;
+            }
+            handed += 1;
+            if !visit(entry) {
+                return Walked::Stopped;
+            }
+        }
+    }
+    match partial {
+        true => Walked::Partial,
+        false => Walked::Complete,
+    }
+}
+
 /// A document together with the snapshot it was read from, which is where its
 /// images are read from too.
 #[derive(Clone)]
