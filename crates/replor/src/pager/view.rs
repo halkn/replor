@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, Clear, Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::pager::help;
-use crate::pager::state::{Mode, PagerState, source_line_at};
+use crate::pager::state::{Mode, PagerState};
 use replor_render::layout::theme::{Color, Style, Theme};
 use replor_render::layout::wrap::display_width;
 use replor_render::layout::{RenderedLine, StyleRole};
@@ -57,7 +57,12 @@ pub struct LinkBar {
 pub struct ViewContext<'a> {
     pub title: &'a str,
     pub flavor: &'a str,
-    pub source_lines: usize,
+    /// The line of the file at the top, the `line` of the status bar's
+    /// `line/lines`, or 0 when no line of it is there. A line of the file,
+    /// not of the document, which may have lines of its own around it.
+    pub top_line: usize,
+    /// The file's lines, the `lines` of the status bar's `line/lines`.
+    pub lines: usize,
     pub diagnostics: usize,
     pub theme: Theme,
     /// Drawn reversed, so the reader sees which link `Enter` follows.
@@ -124,7 +129,6 @@ pub fn draw(
         })
         .collect();
 
-    let current = source_line_at(lines, state.viewport.top).unwrap_or(0);
     frame.render_widget(Paragraph::new(rows), body);
     if let Some(bar) = ctx.link_bar
         && body.height > 1
@@ -137,10 +141,7 @@ pub fn draw(
         frame.render_widget(Clear, area);
         frame.render_widget(link_bar(bar, ctx, area.width as usize), area);
     }
-    frame.render_widget(
-        status_bar(state, ctx, current, status.width as usize),
-        status,
-    );
+    frame.render_widget(status_bar(state, ctx, status.width as usize), status);
     match state.mode() {
         Mode::Outline => draw_outline(frame, state, ctx, body),
         Mode::Help => draw_help(frame, state, ctx, body),
@@ -350,12 +351,7 @@ fn link_bar<'a>(bar: &LinkBar, ctx: &ViewContext<'_>, width: usize) -> Paragraph
     ]))
 }
 
-fn status_bar<'a>(
-    state: &PagerState,
-    ctx: &ViewContext<'_>,
-    source_line: usize,
-    width: usize,
-) -> Paragraph<'a> {
+fn status_bar<'a>(state: &PagerState, ctx: &ViewContext<'_>, width: usize) -> Paragraph<'a> {
     let style = convert(ctx.theme.style(StyleRole::Status));
     if let Some(session) = state.search_session() {
         let tally = tally(state.visible_search());
@@ -380,8 +376,8 @@ fn status_bar<'a>(
     let mut right = format!(
         "{}  {}/{}  {}%",
         ctx.flavor,
-        source_line,
-        ctx.source_lines,
+        ctx.top_line,
+        ctx.lines,
         state.percentage()
     );
     if ctx.diagnostics > 0 {
@@ -587,7 +583,8 @@ mod tests {
             link_bar: None,
             title: "doc.md",
             flavor: "gfm",
-            source_lines: 1,
+            top_line: 1,
+            lines: 1,
             diagnostics: 0,
             theme: Theme::new(replor_render::layout::theme::Variant::Dark)
                 .with_color(replor_render::output::ColorChoice::Plain),
@@ -681,7 +678,8 @@ mod tests {
             link_bar: None,
             title: "doc.md",
             flavor: "gfm",
-            source_lines: lines.len(),
+            top_line: 1,
+            lines: lines.len(),
             diagnostics: 0,
             theme: Theme::new(replor_render::layout::theme::Variant::Dark),
         };
@@ -751,7 +749,8 @@ mod tests {
             link_bar: None,
             title: "doc.md",
             flavor: "gfm",
-            source_lines: 1,
+            top_line: 1,
+            lines: 1,
             diagnostics: 0,
             theme,
         };
@@ -879,7 +878,8 @@ mod tests {
             link_bar: None,
             title: "doc.md",
             flavor: "gfm",
-            source_lines: taller.len(),
+            top_line: 1,
+            lines: taller.len(),
             diagnostics: 0,
             theme: Theme::new(replor_render::layout::theme::Variant::Dark),
         };
@@ -922,7 +922,8 @@ mod tests {
             link_bar: None,
             title: "doc.md",
             flavor: "gfm",
-            source_lines: 1,
+            top_line: 1,
+            lines: 1,
             diagnostics: 0,
             theme: Theme::new(replor_render::layout::theme::Variant::Dark),
         };
