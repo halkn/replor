@@ -60,7 +60,14 @@ const NOT_MARKDOWN: &str = "not Markdown";
 /// The opening fence a file shown as code has above its first line.
 const FENCE_LINES: usize = 1;
 
-pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options) -> Content {
+/// `wiki_root` is the wiki the tree is in, whose pages are drawn as Azure
+/// DevOps draws them, with their `/` references starting at it.
+pub fn open(
+    snapshot: &Arc<dyn Snapshot>,
+    path: &SnapshotPath,
+    wiki_root: Option<&SnapshotPath>,
+    options: &Options,
+) -> Content {
     let extension = extension(path);
     let content = |document: PreparedDocument, kind: &str, line_offset| Content {
         lines: document.document().source.line_count(),
@@ -71,8 +78,15 @@ pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options
         markdown: Err(NOT_MARKDOWN.to_string()),
     };
     if is_markdown(path) {
-        let kind = flavor_name(options.flavor);
-        match markdown(snapshot, path, options) {
+        // A page of a wiki needs `[[_TOSP_]]` and `::: mermaid`, so the
+        // configured flavor applies only outside it.
+        let wiki_root = wiki_root.filter(|root| path.starts_with(root));
+        let flavor = match wiki_root {
+            Some(_) => Flavor::AzureDevops,
+            None => options.flavor,
+        };
+        let kind = flavor_name(flavor);
+        match markdown(snapshot, path, wiki_root, flavor, options) {
             Ok(document) => Content {
                 markdown: Ok(()),
                 ..content(document, &kind, 0)
@@ -158,21 +172,22 @@ fn extension(path: &SnapshotPath) -> String {
 fn markdown(
     snapshot: &Arc<dyn Snapshot>,
     path: &SnapshotPath,
+    wiki_root: Option<&SnapshotPath>,
+    flavor: Flavor,
     options: &Options,
 ) -> Result<PreparedDocument, String> {
     let loaded =
         document::load(Arc::clone(snapshot), path.clone()).map_err(|err| err.to_string())?;
-    let built = document::build(
-        loaded.text,
-        options.flavor,
-        options.mermaid,
-        options.mermaid_width,
-    );
+    let source = match wiki_root {
+        Some(root) => loaded.source.with_wiki_root(root),
+        None => loaded.source,
+    };
+    let built = document::build(loaded.text, flavor, options.mermaid, options.mermaid_width);
     Ok(PreparedDocument::new(
         built,
         InlineContext {
             base_dir: Some(loaded.base_dir),
-            source: Some(loaded.source),
+            source: Some(source),
             ..inline(options)
         },
     ))
@@ -354,7 +369,7 @@ mod tests {
 
     fn shown(dir: &Path, name: &str) -> (String, String) {
         let snapshot: Arc<dyn Snapshot> = Arc::new(WorktreeSnapshot::open(dir).unwrap());
-        let content = open(&snapshot, &SnapshotPath::new(name).unwrap(), &OPTIONS);
+        let content = open(&snapshot, &SnapshotPath::new(name).unwrap(), None, &OPTIONS);
         let rendered = layout_document(&content.document, LayoutOptions::new(80));
         let text = rendered
             .lines
@@ -418,7 +433,7 @@ mod tests {
         let snapshot: Arc<dyn Snapshot> = Arc::new(WorktreeSnapshot::open(dir.path()).unwrap());
         let source_of = |name: &str| {
             let path = SnapshotPath::new(name).unwrap();
-            let rendering = open(&snapshot, &path, &OPTIONS);
+            let rendering = open(&snapshot, &path, None, &OPTIONS);
             source(&rendering, &path, &OPTIONS).map(|_| ())
         };
         write(

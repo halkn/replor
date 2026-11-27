@@ -21,6 +21,7 @@ use replor_render::layout::{LayoutOptions, RenderedDocument, StyleRole, layout_d
 use replor_render::markdown::model::{Document, headings};
 use replor_render::navigation::{Anchor, Link, Target, anchors, links};
 use replor_render::snapshot::{EntryKind, Snapshot, SnapshotPath};
+use replor_render::wiki;
 
 use crate::finder::{self, Candidates, Finder, FinderInput};
 use crate::navigate::{self, Destination, History, Place};
@@ -146,6 +147,8 @@ pub enum Outcome {
 
 pub struct App {
     snapshot: Arc<dyn Snapshot>,
+    /// The wiki the tree's top is in, found once at the start.
+    wiki_root: Option<SnapshotPath>,
     tree: Tree,
     focus: Focus,
     options: Options,
@@ -190,6 +193,7 @@ impl App {
         theme: Theme,
         size: Rect,
     ) -> Self {
+        let wiki_root = wiki::find_root(&*snapshot, &top);
         let tree = Tree::new(Arc::clone(&snapshot), top);
         let message = match tree.error() {
             Some(error) => format!("Cannot list this directory: {error}"),
@@ -200,6 +204,7 @@ impl App {
         let candidates = Candidates::start(Arc::clone(&snapshot), finder::LIMITS);
         let mut app = Self {
             snapshot,
+            wiki_root,
             tree,
             focus: Focus::Tree,
             options,
@@ -227,8 +232,16 @@ impl App {
 
     /// Opens `path` in the preview and selects it in the tree.
     pub fn open(&mut self, path: &SnapshotPath) {
-        let content = preview::open(&self.snapshot, path, &self.options);
+        let content = self.preview(path);
         self.replace(Some(path.clone()), content);
+    }
+
+    pub fn wiki_root(&self) -> Option<&SnapshotPath> {
+        self.wiki_root.as_ref()
+    }
+
+    fn preview(&self, path: &SnapshotPath) -> Content {
+        preview::open(&self.snapshot, path, self.wiki_root.as_ref(), &self.options)
     }
 
     /// A message in the status bar, such as a warning about the configuration.
@@ -467,7 +480,7 @@ impl App {
                 None => self.refuse(format!("no heading #{fragment}")),
             },
             Destination::File { path, fragment } => {
-                let content = preview::open(&self.snapshot, &path, &self.options);
+                let content = self.preview(&path);
                 // The heading is looked for before anything moves, so a
                 // missing one leaves the reader where they are.
                 let line = match &fragment {
@@ -526,7 +539,7 @@ impl App {
         };
         let replaced = self.opened.as_ref() != Some(&place.path);
         if replaced {
-            let content = preview::open(&self.snapshot, &place.path, &self.options);
+            let content = self.preview(&place.path);
             self.replace(Some(place.path.clone()), content);
         }
         self.scroll_to_file_line(place.line);
@@ -657,7 +670,7 @@ impl App {
         self.tree.reload();
         self.candidates = Candidates::start(Arc::clone(&self.snapshot), finder::LIMITS);
         if let Some(path) = self.opened.clone() {
-            let rendering = preview::open(&self.snapshot, &path, &self.options);
+            let rendering = self.preview(&path);
             let mut refused = None;
             // The source stays shown, unless the file has grown past what it
             // can show.
