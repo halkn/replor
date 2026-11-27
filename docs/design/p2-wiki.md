@@ -49,8 +49,11 @@ pub struct WikiPage {
     pub body: Option<SnapshotPath>,
     /// 子ページのフォルダ `Page/`。
     pub children: Option<SnapshotPath>,
+}
+
+impl WikiPage {
     /// `.order` にあるのに、本文もフォルダも無い。
-    pub missing: bool,
+    pub fn missing(&self) -> bool;
 }
 
 pub struct WikiLevel {
@@ -58,9 +61,7 @@ pub struct WikiLevel {
     /// `.order` で 2 度目以降に出た名前の数。
     pub duplicates: usize,
     /// `.order` を読めなかった理由。そのときは `.order` が無いときと同じ並びにする。
-    pub order_error: Option<SnapshotError>,
-    /// 一覧の上限で切った。
-    pub partial: bool,
+    pub order_error: Option<OrderError>,
 }
 
 pub fn list_level(snapshot: &dyn Snapshot, folder: &SnapshotPath) -> Result<WikiLevel, SnapshotError>;
@@ -72,8 +73,8 @@ pub fn list_level(snapshot: &dyn Snapshot, folder: &SnapshotPath) -> Result<Wiki
 - ページになるのは `.md` のファイルとディレクトリだけで、`.attachments` と、それ以外のファイル（画像・`.order` など）はページにしない。
   - 本文の無いフォルダもページにする。Microsoft Learn（publish-repo-to-wiki）は、Markdown を持たないサブフォルダにも親ページを作るとしている。
   - symlink は、Files lens と同じく展開しない。`.md` の symlink は、`resolve` で通常のファイルになるときだけ本文にする。
-- 一覧は Snapshot の `list` を 1 階層ずつ使う。上限と `partial` は Files lens と同じ値と規則にする。
-  - `partial` のときは、`missing` のページを出さない。切った先にあるだけかもしれないため（旧 replor と同じ）。
+- 一覧は Snapshot の `list` を 1 階層ずつ使い、Files lens と同じく上限を設けない。
+  - `list` は 1 階層を切らずに返すので、一覧を切ったことを表す状態（旧 replor の `partial`）は持たない。Files lens に 1 階層の上限を入れるときは、同じ値をここにも使い、切った階層では `missing` のページを出さない（切った先にあるだけかもしれないため）。
 
 ### `.order`
 
@@ -87,7 +88,7 @@ pub fn list_level(snapshot: &dyn Snapshot, folder: &SnapshotPath) -> Result<Wiki
   1. `.order` に書かれた順。
   1. `.order` に無いページを、名前の UTF-8 のバイト順で後ろに足す。`.order` が無いフォルダは、すべてこの順にする。
   - Microsoft Learn は「アルファベット順」とだけ書き、大文字小文字の扱いを書いていない。Files lens と同じバイト順にする。
-- `.order` は 1 MiB まで読む。超えたら `order_error` にする。
+- `.order` は 1 MiB まで読む。超えたとき、UTF-8 でないときは `order_error` にする。
 
 ### ページ名
 
@@ -149,7 +150,7 @@ pub fn list_level(snapshot: &dyn Snapshot, folder: &SnapshotPath) -> Result<Wiki
   - 各項目のリンクは、子ページの本文への相対リンクにする。ページ名に `:` を含むとリンクが URL の scheme に読まれるので、`./` を付け、`%`・`#`・`?` と制御文字はエスケープする（旧 replor と同じ）。
   - Microsoft Learn（markdown-guidance）は、並び順と深さを書いていない。直接の子だけを、Wiki の順で出す。
 - Wiki の外の文書では、今のプレースホルダ（`TOSP_MESSAGE`）のままにする。子ページの規則は Wiki の中にしか無い。
-- 子ページの一覧を取れなかったとき（一覧の失敗、上限で切った）は、取れた分を出し、取れなかった理由を同じブロックに書く。文書全体の表示は止めない。
+- 子ページの一覧を取れなかったとき（一覧の失敗、`.order` の失敗）は、取れた分を出し、取れなかった理由を同じブロックに書く。文書全体の表示は止めない。
 - `document::build` は今、文字列だけから文書を作っている。子ページの一覧は、`[[_TOC_]]` の見出しと同じく、組み立てた後に `wiki` module で埋める。`build` の引数に Snapshot を足さない。
 
 ## fixture と検証

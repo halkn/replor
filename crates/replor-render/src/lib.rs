@@ -14,6 +14,7 @@ pub mod output;
 pub mod snapshot;
 pub mod source;
 pub mod text;
+pub mod wiki;
 
 use std::path::PathBuf;
 
