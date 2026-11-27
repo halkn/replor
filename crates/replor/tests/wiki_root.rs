@@ -57,6 +57,23 @@ fn a_root_relative_link_in_the_wiki_starts_at_the_wiki_root() {
 }
 
 #[test]
+fn a_root_relative_link_cannot_climb_above_the_wiki_root() {
+    let dir = code_wiki();
+    let mut app = app(dir.path(), "docs/wiki");
+    app.open(&path("docs/wiki/Home.md"));
+    app.key(ch('g'));
+    app.key(ch('f'));
+    app.key(ch('f'));
+    app.key(key(KeyCode::Enter));
+    assert_eq!(app.opened(), Some(&path("docs/wiki/Home.md")));
+    let refused = app.link_bar().map(|bar| bar.text.clone());
+    assert_eq!(
+        refused.as_deref(),
+        Some("cannot follow /../../README.md: the link leaves the wiki")
+    );
+}
+
+#[test]
 fn without_a_wiki_the_same_link_starts_at_the_repository_root() {
     let dir = code_wiki();
     let mut app = app(dir.path(), "docs");

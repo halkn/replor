@@ -41,7 +41,10 @@ pub fn resolve(source: Option<&DocumentSource>, dest: &str) -> Result<Destinatio
         source.reference_root(),
         &percent_decoded(path),
     )
-    .map_err(|_| "the link leaves the repository".to_string())?;
+    .map_err(|_| match (source.wiki_root(), path.starts_with('/')) {
+        (Some(_), true) => "the link leaves the wiki".to_string(),
+        _ => "the link leaves the repository".to_string(),
+    })?;
     // Checked now so a link that cannot be read is not followed at all.
     source.snapshot().resolve(&path).map_err(|err| match err {
         SnapshotError::OutsideRoot => "the link leaves the repository".to_string(),

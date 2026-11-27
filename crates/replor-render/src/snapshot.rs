@@ -51,7 +51,8 @@ impl SnapshotPath {
 
     /// Resolves a Markdown reference (a link or image path) from `document`.
     /// A leading `/` starts from `reference_root` (`DocumentSource`), as
-    /// GitHub and Azure DevOps do; anything else starts from the document's
+    /// GitHub and Azure DevOps do, and cannot climb above it: `/` names that
+    /// root, so nothing is above it. Anything else starts from the document's
     /// directory. `.` and `..` are resolved lexically, so the result can still
     /// pass through a symlink: the snapshot checks where a read really ends up.
     pub fn from_reference(
@@ -60,7 +61,13 @@ impl SnapshotPath {
         reference: &str,
     ) -> Result<Self, PathError> {
         match reference.strip_prefix('/') {
-            Some(rest) => reference_root.join_lexical(rest),
+            Some(rest) => {
+                let path = reference_root.join_lexical(rest)?;
+                match path.starts_with(reference_root) {
+                    true => Ok(path),
+                    false => Err(PathError::AboveRoot(reference.to_string())),
+                }
+            }
             None => document
                 .parent()
                 .unwrap_or_default()
@@ -464,6 +471,11 @@ mod tests {
         );
         assert_eq!(resolve("../../../a.png").ok(), None);
         assert_eq!(resolve("a\0.png").ok(), None);
+        // `..` climbs out of the directory, but `/` has nothing above it.
+        assert_eq!(resolve("../../a.png"), Ok(path("a.png")));
+        assert_eq!(resolve("/../a.png").ok(), None);
+        assert_eq!(resolve("/x/../../a.png").ok(), None);
+        assert_eq!(resolve("/x/../a.png"), Ok(path("wiki/a.png")));
     }
 
     #[test]
