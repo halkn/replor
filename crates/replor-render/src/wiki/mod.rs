@@ -56,8 +56,8 @@ pub enum OrderError {
 }
 
 /// The pages of `folder`: those `.order` names first, in its order, then the
-/// rest by the UTF-8 bytes of their file names, as the Files lens sorts.
-/// Fails only when the folder itself cannot be listed.
+/// rest by the UTF-8 bytes of their names without `.md`, folders and files
+/// together. Fails only when the folder itself cannot be listed.
 pub fn list_level(
     snapshot: &dyn Snapshot,
     folder: &SnapshotPath,
@@ -67,7 +67,9 @@ pub fn list_level(
     let mut order_file = None;
     for entry in snapshot.list(folder)? {
         match entry.kind {
-            EntryKind::Directory if entry.name != ".attachments" => {
+            // A working tree lists a nested repository as a directory and a
+            // revision as a submodule; both are the same folder of pages.
+            EntryKind::Directory | EntryKind::Submodule if entry.name != ".attachments" => {
                 found.entry(entry.name).or_default().1 = Some(entry.path);
             }
             EntryKind::File | EntryKind::Symlink if entry.name == ".order" => {
@@ -79,7 +81,16 @@ pub fn list_level(
                 };
                 // A symlink is a body only when it ends at a file, as the
                 // Files lens opens it; a folder behind one is never listed.
-                if entry.kind == EntryKind::Symlink && snapshot.resolve(&entry.path).is_err() {
+                // Any other failure keeps the page, so opening it says why.
+                if entry.kind == EntryKind::Symlink
+                    && matches!(
+                        snapshot.resolve(&entry.path),
+                        Err(SnapshotError::NotFound
+                            | SnapshotError::NotAFile
+                            | SnapshotError::OutsideRoot
+                            | SnapshotError::Unsupported)
+                    )
+                {
                     continue;
                 }
                 found.entry(stem.to_string()).or_default().0 = Some(entry.path);

@@ -193,6 +193,21 @@ fn only_markdown_files_and_folders_are_pages() {
 }
 
 #[test]
+fn a_nested_repository_is_a_folder_of_pages_in_both() {
+    let repo = Repo::new(|root| {
+        write(&root.join(".order"), "Vendor\n");
+        write(&root.join("Vendor/Page.md"), "p");
+        let vendor = root.join("Vendor");
+        git(&vendor, &["init", "-q"]);
+        git(&vendor, &["add", "-A"]);
+        git(&vendor, &["commit", "-q", "-m", "vendor"]);
+    });
+    for (label, level) in repo.levels("") {
+        assert_eq!(pages(&level), ["Vendor | Vendor | - | Vendor"], "{label}");
+    }
+}
+
+#[test]
 fn a_line_that_cannot_name_a_page_is_passed_over() {
     let repo = Repo::new(|root| {
         write(&root.join(".order"), "a/b\n..\n.git\n# note\nPage\n");
