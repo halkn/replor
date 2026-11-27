@@ -18,10 +18,7 @@ use replor_render::snapshot::{Snapshot, SnapshotError, SnapshotPath};
 use replor_render::wiki::{self, OrderError, WikiLevel};
 use replor_snapshot::{RevisionSnapshot, WorktreeSnapshot};
 
-const FIXTURE: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../replor/tests/fixtures/azure-wiki"
-);
+const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../replor/tests/fixtures");
 
 struct Repo {
     _dir: tempfile::TempDir,
@@ -37,8 +34,18 @@ impl Repo {
         Self { _dir: dir, root }
     }
 
+    /// A project wiki: the wiki root is the repository's root.
     fn fixture() -> Self {
-        Self::new(|root| copy_dir(Path::new(FIXTURE), root))
+        Self::copy("azure-wiki")
+    }
+
+    /// A code wiki in `docs/wiki/`, below the repository's root.
+    fn code_wiki() -> Self {
+        Self::copy("code-wiki")
+    }
+
+    fn copy(fixture: &str) -> Self {
+        Self::new(|root| copy_dir(&Path::new(FIXTURES).join(fixture), root))
     }
 
     /// The working tree and the commit made from it.
@@ -83,6 +90,20 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+/// The wiki root found from each of `starts`, `-` for none.
+fn roots(snapshot: &dyn Snapshot, starts: &[&str]) -> Vec<String> {
+    starts
+        .iter()
+        .map(|start| {
+            let start = SnapshotPath::new(start).unwrap();
+            match wiki::find_root(snapshot, &start) {
+                Some(root) => format!("{start} -> {root}"),
+                None => format!("{start} -> -"),
+            }
+        })
+        .collect()
+}
+
 /// One line a page, so a failure shows the whole level.
 fn pages(level: &WikiLevel) -> Vec<String> {
     let shown = |path: &Option<SnapshotPath>| match path {
@@ -103,6 +124,69 @@ fn pages(level: &WikiLevel) -> Vec<String> {
             )
         })
         .collect()
+}
+
+#[test]
+fn every_folder_of_a_project_wiki_finds_the_repository_root() {
+    for (label, snapshot) in Repo::fixture().both() {
+        assert_eq!(
+            roots(&*snapshot, &["", "Design", "Folder-Only"]),
+            [" -> ", "Design -> ", "Folder-Only -> "],
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn a_code_wiki_is_found_from_its_folders_only() {
+    for (label, snapshot) in Repo::code_wiki().both() {
+        assert_eq!(
+            roots(&*snapshot, &["docs/wiki/Sub", "docs/wiki", "docs", ""]),
+            [
+                "docs/wiki/Sub -> docs/wiki",
+                "docs/wiki -> docs/wiki",
+                "docs -> -",
+                " -> -",
+            ],
+            "{label}"
+        );
+    }
+}
+
+#[test]
+fn only_an_order_file_or_an_attachments_folder_marks_a_wiki() {
+    let repo = Repo::new(|root| {
+        write(&root.join("a/.order/x"), "x");
+        write(&root.join("b/.attachments"), "x");
+        write(&root.join("c/.attachments/x.png"), "x");
+    });
+    for (label, snapshot) in repo.both() {
+        assert_eq!(
+            roots(&*snapshot, &["a", "b", "c"]),
+            ["a -> -", "b -> -", "c -> c"],
+            "{label}"
+        );
+    }
+}
+
+/// A revision lists a nested clone as a submodule it cannot look into, so
+/// only the working tree has a wiki there.
+#[test]
+fn a_wiki_in_a_nested_clone_stops_at_the_clone() {
+    let repo = Repo::new(|root| {
+        write(&root.join(".order"), "Home\n");
+        write(&root.join("vendor/wiki/.order"), "Page\n");
+        write(&root.join("vendor/wiki/Page.md"), "p");
+        let vendor = root.join("vendor");
+        git(&vendor, &["init", "-q"]);
+        git(&vendor, &["add", "-A"]);
+        git(&vendor, &["commit", "-q", "-m", "vendor"]);
+    });
+    let [(_, worktree), _] = repo.both();
+    assert_eq!(
+        roots(&*worktree, &["vendor/wiki", "vendor", ""]),
+        ["vendor/wiki -> vendor/wiki", "vendor -> -", " -> "]
+    );
 }
 
 #[test]
