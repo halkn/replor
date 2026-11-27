@@ -515,7 +515,7 @@ mod tests {
         snapshot.write("docs/wiki/.attachments/a.png", png(200, 100));
         let source = snapshot.source("docs/wiki/Sub/Page.md");
         assert!(resolve("/.attachments/a.png", Some(&source), SUPPORT, 80).is_none());
-        let source = source.with_wiki_root(&SnapshotPath::new("docs/wiki").unwrap());
+        let source = source.with_wiki_root(Some(&SnapshotPath::new("docs/wiki").unwrap()));
         assert!(resolve("/.attachments/a.png", Some(&source), SUPPORT, 80).is_some());
     }
 

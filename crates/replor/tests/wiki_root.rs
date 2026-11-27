@@ -11,31 +11,11 @@ use crossterm::event::KeyCode;
 use replor::app::App;
 use replor_render::flavor::Flavor;
 
-const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
-
 const WIDTH: u16 = 100;
 const HEIGHT: u16 = 20;
 
-/// The code wiki fixture in a repository of its own, so nothing reads past
-/// it.
 fn code_wiki() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    copy_dir(&Path::new(FIXTURES).join("code-wiki"), dir.path());
-    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
-    dir
-}
-
-fn copy_dir(from: &Path, to: &Path) {
-    for entry in std::fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let target = to.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
-            std::fs::create_dir_all(&target).unwrap();
-            copy_dir(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), target).unwrap();
-        }
-    }
+    common::fixture("code-wiki")
 }
 
 /// Opened at `top` with `gfm` configured, so a page drawn as `azure-devops`

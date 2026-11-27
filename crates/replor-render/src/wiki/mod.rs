@@ -66,15 +66,10 @@ pub fn find_root(snapshot: &dyn Snapshot, start: &SnapshotPath) -> Option<Snapsh
         .child(".order")
         .map(|document| snapshot.content_root(&document))
         .unwrap_or_default();
-    let mut found = None;
-    let mut dir = Some(start.clone());
-    while let Some(at) = dir.filter(|at| at.starts_with(&boundary)) {
-        if marks_a_wiki(snapshot, &at) {
-            found = Some(at.clone());
-        }
-        dir = at.parent();
-    }
-    found
+    std::iter::successors(Some(start.clone()), SnapshotPath::parent)
+        .take_while(|dir| dir.starts_with(&boundary))
+        .filter(|dir| marks_a_wiki(snapshot, dir))
+        .last()
 }
 
 fn marks_a_wiki(snapshot: &dyn Snapshot, dir: &SnapshotPath) -> bool {

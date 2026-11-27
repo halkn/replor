@@ -78,22 +78,18 @@ pub fn open(
         markdown: Err(NOT_MARKDOWN.to_string()),
     };
     if is_markdown(path) {
-        // A page of a wiki needs `[[_TOSP_]]` and `::: mermaid`, so the
-        // configured flavor applies only outside it.
-        let wiki_root = wiki_root.filter(|root| path.starts_with(root));
-        let flavor = match wiki_root {
-            Some(_) => Flavor::AzureDevops,
-            None => options.flavor,
-        };
-        let kind = flavor_name(flavor);
-        match markdown(snapshot, path, wiki_root, flavor, options) {
-            Ok(document) => Content {
+        match markdown(snapshot, path, wiki_root, options) {
+            Ok((document, flavor)) => Content {
                 markdown: Ok(()),
-                ..content(document, &kind, 0)
+                ..content(document, &flavor_name(flavor), 0)
             },
             Err(reason) => Content {
                 markdown: Err(reason.clone()),
-                ..content(plain(&cannot_show(&reason), options), &kind, 0)
+                ..content(
+                    plain(&cannot_show(&reason), options),
+                    &flavor_name(options.flavor),
+                    0,
+                )
             },
         }
     } else if IMAGES.contains(&extension.as_str()) {
@@ -169,28 +165,32 @@ fn extension(path: &SnapshotPath) -> String {
         .unwrap_or_default()
 }
 
+/// The document and the flavor it was drawn with.
 fn markdown(
     snapshot: &Arc<dyn Snapshot>,
     path: &SnapshotPath,
     wiki_root: Option<&SnapshotPath>,
-    flavor: Flavor,
     options: &Options,
-) -> Result<PreparedDocument, String> {
+) -> Result<(PreparedDocument, Flavor), String> {
     let loaded =
         document::load(Arc::clone(snapshot), path.clone()).map_err(|err| err.to_string())?;
-    let source = match wiki_root {
-        Some(root) => loaded.source.with_wiki_root(root),
-        None => loaded.source,
+    let source = loaded.source.with_wiki_root(wiki_root);
+    // A page of a wiki needs `[[_TOSP_]]` and `::: mermaid`, so the
+    // configured flavor applies only outside it.
+    let flavor = match source.wiki_root() {
+        Some(_) => Flavor::AzureDevops,
+        None => options.flavor,
     };
     let built = document::build(loaded.text, flavor, options.mermaid, options.mermaid_width);
-    Ok(PreparedDocument::new(
+    let document = PreparedDocument::new(
         built,
         InlineContext {
             base_dir: Some(loaded.base_dir),
             source: Some(source),
             ..inline(options)
         },
-    ))
+    );
+    Ok((document, flavor))
 }
 
 /// A one-image document read from the snapshot, so the picture goes through
