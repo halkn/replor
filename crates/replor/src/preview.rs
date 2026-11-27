@@ -165,7 +165,8 @@ fn extension(path: &SnapshotPath) -> String {
         .unwrap_or_default()
 }
 
-/// The document and the flavor it was drawn with.
+/// The flavor comes back with the document: whether it is a page of the wiki
+/// is known only once `load` has resolved where it really is.
 fn markdown(
     snapshot: &Arc<dyn Snapshot>,
     path: &SnapshotPath,

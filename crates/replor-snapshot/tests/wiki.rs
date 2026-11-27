@@ -90,7 +90,6 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
-/// The wiki root found from each of `starts`, `-` for none.
 fn roots(snapshot: &dyn Snapshot, starts: &[&str]) -> Vec<String> {
     starts
         .iter()

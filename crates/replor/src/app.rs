@@ -147,7 +147,6 @@ pub enum Outcome {
 
 pub struct App {
     snapshot: Arc<dyn Snapshot>,
-    /// The wiki the tree's top is in, found once at the start.
     wiki_root: Option<SnapshotPath>,
     tree: Tree,
     focus: Focus,
