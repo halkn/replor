@@ -36,9 +36,12 @@ pub fn resolve(source: Option<&DocumentSource>, dest: &str) -> Result<Destinatio
         };
     }
     let source = source.ok_or("this document has no files to link to")?;
-    let path =
-        SnapshotPath::from_reference(source.path(), source.content_root(), &percent_decoded(path))
-            .map_err(|_| "the link leaves the repository".to_string())?;
+    let path = SnapshotPath::from_reference(
+        source.path(),
+        source.reference_root(),
+        &percent_decoded(path),
+    )
+    .map_err(|_| "the link leaves the repository".to_string())?;
     // Checked now so a link that cannot be read is not followed at all.
     source.snapshot().resolve(&path).map_err(|err| match err {
         SnapshotError::OutsideRoot => "the link leaves the repository".to_string(),

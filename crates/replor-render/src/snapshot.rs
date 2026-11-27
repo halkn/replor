@@ -50,17 +50,17 @@ impl SnapshotPath {
     }
 
     /// Resolves a Markdown reference (a link or image path) from `document`.
-    /// A leading `/` starts from `content_root`, as GitHub and Azure DevOps do;
-    /// anything else starts from the document's directory. `.` and `..` are
-    /// resolved lexically, so the result can still pass through a symlink: the
-    /// snapshot checks where a read really ends up.
+    /// A leading `/` starts from `reference_root` (`DocumentSource`), as
+    /// GitHub and Azure DevOps do; anything else starts from the document's
+    /// directory. `.` and `..` are resolved lexically, so the result can still
+    /// pass through a symlink: the snapshot checks where a read really ends up.
     pub fn from_reference(
         document: &SnapshotPath,
-        content_root: &SnapshotPath,
+        reference_root: &SnapshotPath,
         reference: &str,
     ) -> Result<Self, PathError> {
         match reference.strip_prefix('/') {
-            Some(rest) => content_root.join_lexical(rest),
+            Some(rest) => reference_root.join_lexical(rest),
             None => document
                 .parent()
                 .unwrap_or_default()
@@ -208,7 +208,7 @@ pub trait Snapshot: Send + Sync {
     /// passes `limit`, without reading the rest.
     fn read(&self, path: &SnapshotPath, limit: u64) -> Result<Vec<u8>, SnapshotError>;
     /// The boundary for the images a document may show, and the start of its
-    /// `/` references.
+    /// `/` references unless a wiki moves that (`DocumentSource`).
     fn content_root(&self, document: &SnapshotPath) -> SnapshotPath;
     /// A name for the status bar: a path for a working tree, a short OID for a
     /// revision.
@@ -287,6 +287,9 @@ pub struct DocumentSource {
     snapshot: Arc<dyn Snapshot>,
     path: SnapshotPath,
     content_root: SnapshotPath,
+    /// Where a `/` reference starts: the content root, or the wiki root for a
+    /// page of a wiki. Always inside the content root.
+    reference_root: SnapshotPath,
 }
 
 impl DocumentSource {
@@ -299,8 +302,20 @@ impl DocumentSource {
         Self {
             snapshot,
             path,
+            reference_root: content_root.clone(),
             content_root,
         }
+    }
+
+    /// `/` references start from `wiki_root` when the document is a page of
+    /// that wiki (`docs/design/p2-wiki.md`). A wiki root outside the content
+    /// root, which a nested clone inside the wiki gives its own documents, is
+    /// not used, so a reference never starts outside the content root.
+    pub fn with_wiki_root(mut self, wiki_root: &SnapshotPath) -> Self {
+        if self.path.starts_with(wiki_root) && wiki_root.starts_with(&self.content_root) {
+            self.reference_root = wiki_root.clone();
+        }
+        self
     }
 
     pub fn snapshot(&self) -> &dyn Snapshot {
@@ -314,6 +329,10 @@ impl DocumentSource {
     pub fn content_root(&self) -> &SnapshotPath {
         &self.content_root
     }
+
+    pub fn reference_root(&self) -> &SnapshotPath {
+        &self.reference_root
+    }
 }
 
 impl fmt::Debug for DocumentSource {
@@ -322,6 +341,7 @@ impl fmt::Debug for DocumentSource {
             .field("snapshot", &self.snapshot.label())
             .field("path", &self.path)
             .field("content_root", &self.content_root)
+            .field("reference_root", &self.reference_root)
             .finish()
     }
 }
@@ -449,6 +469,31 @@ mod tests {
             Ok(path("a.png"))
         );
         assert!(SnapshotPath::from_reference(&doc, &root, "../a.png").is_err());
+    }
+
+    #[test]
+    fn a_page_of_a_wiki_starts_its_references_at_the_wiki_root() {
+        let snapshot = memory::MemorySnapshot::new("");
+        let source = snapshot.source("docs/wiki/Sub/Page.md");
+        assert!(source.reference_root().is_root());
+        let source = source.with_wiki_root(&path("docs/wiki"));
+        assert_eq!(source.reference_root(), &path("docs/wiki"));
+        assert!(source.content_root().is_root());
+    }
+
+    #[test]
+    fn a_wiki_root_the_document_is_not_in_or_above_its_content_root_is_not_used() {
+        let snapshot = memory::MemorySnapshot::new("");
+        let outside = snapshot
+            .source("README.md")
+            .with_wiki_root(&path("docs/wiki"));
+        assert!(outside.reference_root().is_root());
+
+        let nested = memory::MemorySnapshot::new("wiki/vendor");
+        let source = nested
+            .source("wiki/vendor/page.md")
+            .with_wiki_root(&path("wiki"));
+        assert_eq!(source.reference_root(), &path("wiki/vendor"));
     }
 
     #[test]
