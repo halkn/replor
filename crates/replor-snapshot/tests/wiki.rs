@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use common::{git, write};
 use gix::ObjectId;
-use replor_render::snapshot::{Snapshot, SnapshotPath};
+use replor_render::snapshot::{Snapshot, SnapshotError, SnapshotPath};
 use replor_render::wiki::{self, OrderError, WikiLevel};
 use replor_snapshot::{RevisionSnapshot, WorktreeSnapshot};
 
@@ -59,6 +59,15 @@ impl Repo {
             ),
         ]
     }
+
+    /// `folder` listed from both.
+    fn levels(&self, folder: &str) -> Vec<(&'static str, WikiLevel)> {
+        let folder = SnapshotPath::new(folder).unwrap();
+        self.both()
+            .into_iter()
+            .map(|(label, snapshot)| (label, wiki::list_level(&*snapshot, &folder).unwrap()))
+            .collect()
+    }
 }
 
 fn copy_dir(from: &Path, to: &Path) {
@@ -72,10 +81,6 @@ fn copy_dir(from: &Path, to: &Path) {
             std::fs::copy(entry.path(), target).unwrap();
         }
     }
-}
-
-fn path(text: &str) -> SnapshotPath {
-    SnapshotPath::new(text).unwrap()
 }
 
 /// One line a page, so a failure shows the whole level.
@@ -94,7 +99,7 @@ fn pages(level: &WikiLevel) -> Vec<String> {
                 page.name,
                 shown(&page.body),
                 shown(&page.children),
-                if page.missing { " | missing" } else { "" },
+                if page.missing() { " | missing" } else { "" },
             )
         })
         .collect()
@@ -102,9 +107,7 @@ fn pages(level: &WikiLevel) -> Vec<String> {
 
 #[test]
 fn the_root_is_in_order_then_by_name() {
-    let repo = Repo::fixture();
-    for (label, snapshot) in repo.both() {
-        let level = wiki::list_level(&*snapshot, &SnapshotPath::root()).unwrap();
+    for (label, level) in Repo::fixture().levels("") {
         assert_eq!(
             pages(&level),
             [
@@ -124,9 +127,7 @@ fn the_root_is_in_order_then_by_name() {
 
 #[test]
 fn child_pages_are_named_from_their_file_names() {
-    let repo = Repo::fixture();
-    for (label, snapshot) in repo.both() {
-        let level = wiki::list_level(&*snapshot, &path("Design")).unwrap();
+    for (label, level) in Repo::fixture().levels("Design") {
         assert_eq!(
             pages(&level),
             [
@@ -145,9 +146,7 @@ fn child_pages_are_named_from_their_file_names() {
 
 #[test]
 fn a_folder_without_order_is_by_name() {
-    let repo = Repo::fixture();
-    for (label, snapshot) in repo.both() {
-        let level = wiki::list_level(&*snapshot, &path("Folder-Only")).unwrap();
+    for (label, level) in Repo::fixture().levels("Folder-Only") {
         assert_eq!(
             pages(&level),
             ["Folder-Only/Child | Child | Folder-Only/Child.md | -"],
@@ -159,12 +158,9 @@ fn a_folder_without_order_is_by_name() {
 
 #[test]
 fn a_folder_that_cannot_be_listed_is_the_error() {
-    let repo = Repo::fixture();
-    for (label, snapshot) in repo.both() {
-        assert!(
-            wiki::list_level(&*snapshot, &path("Nowhere")).is_err(),
-            "{label}"
-        );
+    let folder = SnapshotPath::new("Nowhere").unwrap();
+    for (label, snapshot) in Repo::fixture().both() {
+        assert!(wiki::list_level(&*snapshot, &folder).is_err(), "{label}");
     }
 }
 
@@ -182,8 +178,7 @@ fn only_markdown_files_and_folders_are_pages() {
         symlink("e", root.join("folder-link")).unwrap();
         symlink("e", root.join("folder-link.md")).unwrap();
     });
-    for (label, snapshot) in repo.both() {
-        let level = wiki::list_level(&*snapshot, &SnapshotPath::root()).unwrap();
+    for (label, level) in repo.levels("") {
         assert_eq!(
             pages(&level),
             [
@@ -203,8 +198,7 @@ fn a_line_that_cannot_name_a_page_is_passed_over() {
         write(&root.join(".order"), "a/b\n..\n.git\n# note\nPage\n");
         write(&root.join("Page.md"), "p");
     });
-    for (label, snapshot) in repo.both() {
-        let level = wiki::list_level(&*snapshot, &SnapshotPath::root()).unwrap();
+    for (label, level) in repo.levels("") {
         assert_eq!(
             pages(&level),
             [
@@ -218,43 +212,29 @@ fn a_line_that_cannot_name_a_page_is_passed_over() {
 
 #[test]
 fn an_order_that_cannot_be_read_leaves_the_pages_by_name() {
-    let large = Repo::new(|root| {
-        let line = "b\n".repeat(wiki::MAX_ORDER_BYTES as usize / 2 + 1);
-        write(&root.join(".order"), line);
-        write(&root.join("a.md"), "a");
-        write(&root.join("b.md"), "b");
-    });
-    for (label, snapshot) in large.both() {
-        let level = wiki::list_level(&*snapshot, &SnapshotPath::root()).unwrap();
-        assert_eq!(
-            pages(&level),
-            ["a | a | a.md | -", "b | b | b.md | -"],
-            "{label}"
-        );
-        assert!(
-            matches!(level.order_error, Some(OrderError::Read(_))),
-            "{label}: {:?}",
-            level.order_error
-        );
-        assert_eq!(level.duplicates, 0, "{label}");
+    let large = "b\n".repeat(wiki::MAX_ORDER_BYTES as usize / 2 + 1);
+    let too_large = SnapshotError::TooLarge {
+        limit: wiki::MAX_ORDER_BYTES,
     }
-
-    let latin1 = Repo::new(|root| {
-        write(&root.join(".order"), b"b\n\xE9\n");
-        write(&root.join("a.md"), "a");
-        write(&root.join("b.md"), "b");
-    });
-    for (label, snapshot) in latin1.both() {
-        let level = wiki::list_level(&*snapshot, &SnapshotPath::root()).unwrap();
-        assert_eq!(
-            pages(&level),
-            ["a | a | a.md | -", "b | b | b.md | -"],
-            "{label}"
-        );
-        assert_eq!(
-            level.order_error,
-            Some(OrderError::Decode { offset: 2 }),
-            "{label}"
-        );
+    .to_string();
+    let cases: [(&[u8], OrderError); 2] = [
+        (large.as_bytes(), OrderError::Read(too_large)),
+        (b"b\n\xE9\n", OrderError::Decode { offset: 2 }),
+    ];
+    for (order, expected) in cases {
+        let repo = Repo::new(|root| {
+            write(&root.join(".order"), order);
+            write(&root.join("a.md"), "a");
+            write(&root.join("b.md"), "b");
+        });
+        for (label, level) in repo.levels("") {
+            assert_eq!(
+                pages(&level),
+                ["a | a | a.md | -", "b | b | b.md | -"],
+                "{label}"
+            );
+            assert_eq!(level.order_error.as_ref(), Some(&expected), "{label}");
+            assert_eq!(level.duplicates, 0, "{label}");
+        }
     }
 }

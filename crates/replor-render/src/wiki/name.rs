@@ -1,36 +1,19 @@
 //! A page's file name to the name it is shown by.
 
+use crate::text::{into_visible, percent_decoded};
+
 /// `stem` is the file name without `.md`. Azure DevOps writes a space in a
 /// page name as `-` and a special character as its URI escape, so this
 /// undoes both, the escapes once.
 pub fn page_name(stem: &str) -> String {
     let spaced = stem.replace('-', " ");
-    let name = percent_decoded(&spaced).unwrap_or(spaced);
+    let name = match spaced.contains('%') {
+        true => percent_decoded(&spaced).unwrap_or(spaced),
+        false => spaced,
+    };
     // The name is drawn as a tree row and as a child page item, where a
     // control would break the line.
-    crate::text::into_visible(name)
-}
-
-/// `None` when the decoded bytes are not UTF-8. A `%` that does not start an
-/// escape stays as it is.
-fn percent_decoded(text: &str) -> Option<String> {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut at = 0;
-    while at < bytes.len() {
-        let hex = |b: Option<&u8>| b.and_then(|b| char::from(*b).to_digit(16));
-        match (bytes[at], hex(bytes.get(at + 1)), hex(bytes.get(at + 2))) {
-            (b'%', Some(high), Some(low)) => {
-                out.push((high * 16 + low) as u8);
-                at += 3;
-            }
-            (byte, _, _) => {
-                out.push(byte);
-                at += 1;
-            }
-        }
-    }
-    String::from_utf8(out).ok()
+    into_visible(name)
 }
 
 #[cfg(test)]

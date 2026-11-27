@@ -28,8 +28,13 @@ pub struct WikiPage {
     pub body: Option<SnapshotPath>,
     /// `Page/`, the folder holding the page's child pages.
     pub children: Option<SnapshotPath>,
+}
+
+impl WikiPage {
     /// Named in `.order` with neither a body nor a folder.
-    pub missing: bool,
+    pub fn missing(&self) -> bool {
+        self.body.is_none() && self.children.is_none()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,25 +88,25 @@ pub fn list_level(
         }
     }
 
-    let (order, duplicates, order_error) = match order_file.map(|p| read_order(snapshot, &p)) {
+    let order = order_file.map(|path| read_order(snapshot, &path));
+    let (names, duplicates, order_error) = match &order {
         None => (Vec::new(), 0, None),
         Some(Ok(text)) => {
-            let (names, duplicates) = order::parse(&text);
-            let names = names.into_iter().map(str::to_string).collect();
+            let (names, duplicates) = order::parse(text);
             (names, duplicates, None)
         }
-        Some(Err(err)) => (Vec::new(), 0, Some(err)),
+        Some(Err(err)) => (Vec::new(), 0, Some(err.clone())),
     };
 
     let mut pages = Vec::new();
-    for stem in order {
+    for stem in names {
         // A line that cannot be a file name names no page, not even a
         // missing one.
-        let Some(key) = folder.child(&stem) else {
+        let Some(key) = folder.child(stem) else {
             continue;
         };
-        let (body, children) = found.remove(&stem).unwrap_or_default();
-        pages.push(page(&stem, key, body, children));
+        let (body, children) = found.remove(stem).unwrap_or_default();
+        pages.push(page(stem, key, body, children));
     }
     for (stem, (body, children)) in found {
         if let Some(key) = folder.child(&stem) {
@@ -124,18 +129,16 @@ fn page(
     WikiPage {
         name: page_name(stem),
         key,
-        missing: body.is_none() && children.is_none(),
         body,
         children,
     }
 }
 
 fn read_order(snapshot: &dyn Snapshot, path: &SnapshotPath) -> Result<String, OrderError> {
-    let read = |path| -> Result<Vec<u8>, SnapshotError> {
-        let resolved = snapshot.resolve(path)?;
-        snapshot.read(&resolved, MAX_ORDER_BYTES)
-    };
-    let bytes = read(path).map_err(|err| OrderError::Read(err.to_string()))?;
+    let bytes = snapshot
+        .resolve(path)
+        .and_then(|resolved| snapshot.read(&resolved, MAX_ORDER_BYTES))
+        .map_err(|err| OrderError::Read(err.to_string()))?;
     String::from_utf8(bytes).map_err(|err| OrderError::Decode {
         offset: err.utf8_error().valid_up_to(),
     })

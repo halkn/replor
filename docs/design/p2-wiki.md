@@ -49,8 +49,11 @@ pub struct WikiPage {
     pub body: Option<SnapshotPath>,
     /// 子ページのフォルダ `Page/`。
     pub children: Option<SnapshotPath>,
+}
+
+impl WikiPage {
     /// `.order` にあるのに、本文もフォルダも無い。
-    pub missing: bool,
+    pub fn missing(&self) -> bool;
 }
 
 pub struct WikiLevel {
