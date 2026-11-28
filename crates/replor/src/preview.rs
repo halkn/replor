@@ -60,7 +60,14 @@ const NOT_MARKDOWN: &str = "not Markdown";
 /// The opening fence a file shown as code has above its first line.
 const FENCE_LINES: usize = 1;
 
-pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options) -> Content {
+/// `wiki_root` is the wiki the tree is in, whose pages are drawn as Azure
+/// DevOps draws them, with their `/` references starting at it.
+pub fn open(
+    snapshot: &Arc<dyn Snapshot>,
+    path: &SnapshotPath,
+    wiki_root: Option<&SnapshotPath>,
+    options: &Options,
+) -> Content {
     let extension = extension(path);
     let content = |document: PreparedDocument, kind: &str, line_offset| Content {
         lines: document.document().source.line_count(),
@@ -71,15 +78,18 @@ pub fn open(snapshot: &Arc<dyn Snapshot>, path: &SnapshotPath, options: &Options
         markdown: Err(NOT_MARKDOWN.to_string()),
     };
     if is_markdown(path) {
-        let kind = flavor_name(options.flavor);
-        match markdown(snapshot, path, options) {
-            Ok(document) => Content {
+        match markdown(snapshot, path, wiki_root, options) {
+            Ok((document, flavor)) => Content {
                 markdown: Ok(()),
-                ..content(document, &kind, 0)
+                ..content(document, &flavor_name(flavor), 0)
             },
             Err(reason) => Content {
                 markdown: Err(reason.clone()),
-                ..content(plain(&cannot_show(&reason), options), &kind, 0)
+                ..content(
+                    plain(&cannot_show(&reason), options),
+                    &flavor_name(options.flavor),
+                    0,
+                )
             },
         }
     } else if IMAGES.contains(&extension.as_str()) {
@@ -155,27 +165,33 @@ fn extension(path: &SnapshotPath) -> String {
         .unwrap_or_default()
 }
 
+/// The flavor comes back with the document: whether it is a page of the wiki
+/// is known only once `load` has resolved where it really is.
 fn markdown(
     snapshot: &Arc<dyn Snapshot>,
     path: &SnapshotPath,
+    wiki_root: Option<&SnapshotPath>,
     options: &Options,
-) -> Result<PreparedDocument, String> {
+) -> Result<(PreparedDocument, Flavor), String> {
     let loaded =
         document::load(Arc::clone(snapshot), path.clone()).map_err(|err| err.to_string())?;
-    let built = document::build(
-        loaded.text,
-        options.flavor,
-        options.mermaid,
-        options.mermaid_width,
-    );
-    Ok(PreparedDocument::new(
+    let source = loaded.source.with_wiki_root(wiki_root);
+    // A page of a wiki needs `[[_TOSP_]]` and `::: mermaid`, so the
+    // configured flavor applies only outside it.
+    let flavor = match source.wiki_root() {
+        Some(_) => Flavor::AzureDevops,
+        None => options.flavor,
+    };
+    let built = document::build(loaded.text, flavor, options.mermaid, options.mermaid_width);
+    let document = PreparedDocument::new(
         built,
         InlineContext {
             base_dir: Some(loaded.base_dir),
-            source: Some(loaded.source),
+            source: Some(source),
             ..inline(options)
         },
-    ))
+    );
+    Ok((document, flavor))
 }
 
 /// A one-image document read from the snapshot, so the picture goes through
@@ -354,7 +370,7 @@ mod tests {
 
     fn shown(dir: &Path, name: &str) -> (String, String) {
         let snapshot: Arc<dyn Snapshot> = Arc::new(WorktreeSnapshot::open(dir).unwrap());
-        let content = open(&snapshot, &SnapshotPath::new(name).unwrap(), &OPTIONS);
+        let content = open(&snapshot, &SnapshotPath::new(name).unwrap(), None, &OPTIONS);
         let rendered = layout_document(&content.document, LayoutOptions::new(80));
         let text = rendered
             .lines
@@ -418,7 +434,7 @@ mod tests {
         let snapshot: Arc<dyn Snapshot> = Arc::new(WorktreeSnapshot::open(dir.path()).unwrap());
         let source_of = |name: &str| {
             let path = SnapshotPath::new(name).unwrap();
-            let rendering = open(&snapshot, &path, &OPTIONS);
+            let rendering = open(&snapshot, &path, None, &OPTIONS);
             source(&rendering, &path, &OPTIONS).map(|_| ())
         };
         write(

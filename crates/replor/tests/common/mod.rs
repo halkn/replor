@@ -26,6 +26,31 @@ pub fn write(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
+/// `tests/fixtures/<name>` in a repository of its own, so nothing reads past
+/// it into this one.
+pub fn fixture(name: &str) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let from = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(name);
+    copy_dir(&from, dir.path());
+    std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+    dir
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            std::fs::create_dir_all(&target).unwrap();
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
 /// Options that draw diagrams and icons as text, so the output does not
 /// depend on the terminal.
 pub fn options(flavor: Flavor, highlight: bool) -> Options {

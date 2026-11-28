@@ -55,6 +55,33 @@ pub enum OrderError {
     Decode { offset: usize },
 }
 
+/// The wiki `start` is in: the highest folder from `start` up to its content
+/// root that holds a `.order` file or an `.attachments` folder, so every
+/// folder of one wiki finds the same root. Nothing below `start` is looked
+/// at, and nothing above the content root, which a nested clone owns.
+pub fn find_root(snapshot: &dyn Snapshot, start: &SnapshotPath) -> Option<SnapshotPath> {
+    // `content_root` is asked about a document; any name in `start` stands
+    // for one there.
+    let boundary = start
+        .child(".order")
+        .map(|document| snapshot.content_root(&document))
+        .unwrap_or_default();
+    std::iter::successors(Some(start.clone()), SnapshotPath::parent)
+        .take_while(|dir| dir.starts_with(&boundary))
+        .filter(|dir| marks_a_wiki(snapshot, dir))
+        .last()
+}
+
+fn marks_a_wiki(snapshot: &dyn Snapshot, dir: &SnapshotPath) -> bool {
+    snapshot.list(dir).is_ok_and(|entries| {
+        entries.iter().any(|entry| match entry.name.as_str() {
+            ".order" => entry.kind == EntryKind::File,
+            ".attachments" => entry.kind == EntryKind::Directory,
+            _ => false,
+        })
+    })
+}
+
 /// The pages of `folder`: those `.order` names first, in its order, then the
 /// rest by the UTF-8 bytes of their names without `.md`, folders and files
 /// together. Fails only when the folder itself cannot be listed.

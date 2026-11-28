@@ -261,7 +261,7 @@ pub fn load(dest: &str, source: Option<&DocumentSource>) -> Option<Rc<ImageAsset
     let dest = local_path(dest)?;
     let expected = extension_format(Path::new(&dest))?;
     let content_root = source.content_root();
-    let path = SnapshotPath::from_reference(source.path(), content_root, &dest).ok()?;
+    let path = SnapshotPath::from_reference(source.path(), source.reference_root(), &dest).ok()?;
     let resolved = source.snapshot().resolve(&path).ok()?;
     if !resolved.starts_with(content_root) {
         return None;
@@ -506,6 +506,17 @@ mod tests {
     fn a_root_relative_path_resolves_from_the_content_root() {
         let source = wiki().source("wiki/design/page.md");
         assert!(resolve("/.attachments/architecture.png", Some(&source), SUPPORT, 80).is_some());
+    }
+
+    /// A code wiki is a folder of a repository, and its `/` is that folder.
+    #[test]
+    fn a_root_relative_path_in_a_wiki_resolves_from_the_wiki_root() {
+        let snapshot = MemorySnapshot::new("");
+        snapshot.write("docs/wiki/.attachments/a.png", png(200, 100));
+        let source = snapshot.source("docs/wiki/Sub/Page.md");
+        assert!(resolve("/.attachments/a.png", Some(&source), SUPPORT, 80).is_none());
+        let source = source.with_wiki_root(Some(&SnapshotPath::new("docs/wiki").unwrap()));
+        assert!(resolve("/.attachments/a.png", Some(&source), SUPPORT, 80).is_some());
     }
 
     #[test]

@@ -19,7 +19,8 @@ P2 の Wiki lens・Wiki root・`.order`・`[[_TOSP_]]`・Wiki の中のリンク
     - 大きなリポジトリで全体を歩く費用を払わず、`.attachments` だけを持つフォルダを Wiki と取り違えることもない。
     - 代わりに、code wiki をリポジトリの root で起動すると Wiki lens は出ない。code wiki のフォルダ（例: `docs/wiki/`）で起動する。起動の引数が無いときは `docs/` から始まるので（`start.rs`）、`docs/` が Wiki なら引数なしで見つかる。
     - `.git` の無いディレクトリに Wiki のクローンを並べた場合は、親のディレクトリで起動すると Wiki lens は出ない。各クローンの中で起動する。
-- 判定は Snapshot の `list` と `resolve` で行う。作業ツリーとリビジョン（P3 の PR head）で同じ結果になる。
+- 判定は Snapshot の `list` で行う。作業ツリーとリビジョン（P3 の PR head）で同じ結果になる。
+  - symlink の `.order` と `.attachments` は目印にしない。Files lens と同じく symlink を展開しないため。
   - P3 で PR head を開くときは、作業ツリーで起動したパスと同じ相対パスを起点にする。PR head でそのパスが無ければ、tree の root から判定する。
 
 ## flavor
@@ -121,7 +122,9 @@ pub fn list_level(snapshot: &dyn Snapshot, folder: &SnapshotPath) -> Result<Wiki
   - リンクと画像の両方に適用する。`/.attachments/x.png` は Wiki root の `.attachments` を指す。
   - project wiki（Wiki 専用のリポジトリ）では Wiki root と content root が一致するので、結果は変わらない。
   - code wiki では、Wiki root は公開したフォルダで、content root はリポジトリの root になる。Microsoft Learn は、code wiki で `/` がどちらを起点にするかを書いていない。公開したフォルダが Wiki の root として見えることから、Wiki root を起点にする（未確認。下の Open Questions の Q1）。
-  - 画像を読める範囲（content root の境界）は変えない。Wiki root は content root の下にあるので、Wiki root の起点で作った参照は必ず content root の中にある。
+  - 先頭が `/` の参照は、`..` で起点より上に出られない（`/../x` は拒否する）。`/` が起点そのものを指すので、その上は無い。content root を起点にするときも同じ。
+  - 画像を読める範囲（content root の境界）は変えない。Wiki root は content root の下にあり、`/` の参照は Wiki root の外に出ないので、必ず content root の中にある。
+  - Wiki のページかどうかは、文書が実際にある場所（`resolve` の結果）で決める。参照を文書が実際にある場所から解決する（p1-core.md）のと揃えるため。flavor・`/` の起点・以後の Wiki の規則は、すべてこの 1 つの判定に従う。
   - そのため、`DocumentSource` に参照の起点（Wiki root か content root）を、content root とは別に持たせる。`SnapshotPath::from_reference` は、content root ではなくこの起点を受ける。
 - **リンクのパスは、URI のパスと fragment に分けてから、パスを 1 度だけ復号する。** 境界の判定は、復号した後に行う。
   - `%2E%2E` は `..` として扱い、root の外に出るなら拒否する。`%252E` は `%2E` という文字のまま残る。
